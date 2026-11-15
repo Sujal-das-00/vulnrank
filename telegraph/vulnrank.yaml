@@ -17,7 +17,7 @@ description: >-
   leaked secrets, risky code patterns, security headers, and an evidence-based legal checklist with cited rules and
   statutory penalty ceilings. Deterministic, no language model; unavailable sources are reported as unavailable, never
   as a negative result, and "not detected" is never reported as a legal violation.
-base_url: https://REPLACE-WITH-DEPLOYED-URL
+base_url: https://vulnrank.onrender.com
 
 endpoints:
   - path: /vuln-triage
@@ -183,4 +183,4 @@ circuit_threshold: 5
 circuit_cooldown_seconds: 30
 
 docs:
-  repository: https://github.com/REPLACE-WITH-OWNER/vulnrank
+  repository: https://github.com/Sujal-das-00/vulnrank.git
