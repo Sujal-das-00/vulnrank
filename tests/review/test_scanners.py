@@ -84,3 +84,25 @@ async def test_osv_outage_is_reported_not_hidden():
     async with httpx.AsyncClient() as c:
         scan = await scan_dependencies({"requirements.txt": "flask==2.0.0\n"}, Fetcher(c, retries=0, backoff_base=0), lambda ids: None)
     assert scan.coverage["osv"].startswith("unavailable") and scan.vuln_count == 0 and scan.findings == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_severity_never_below_cvss_band_but_order_follows_risk():
+    from app.models import Priority
+    respx.post("https://api.osv.dev/v1/querybatch").respond(200, json={"results": [{"vulns": [{"id": "GHSA-hi"}, {"id": "GHSA-kev"}]}]})
+    for vid, cve in (("GHSA-hi", "CVE-2026-0001"), ("GHSA-kev", "CVE-2026-0002")):
+        respx.get(f"https://api.osv.dev/v1/vulns/{vid}").respond(200, json={"id": vid, "aliases": [cve], "summary": vid, "affected": []})
+
+    def prio(pri, risk, cvss, kev):
+        sig = {"kev": {"listed": kev}, "cvss": {"score": cvss}, "epss": {"probability": 0.01}}
+        return Priority.model_construct(status="scored", priority=pri, risk_score=risk, signals=sig, why_ranked_here=[])
+
+    async def triage(ids):
+        return {"CVE-2026-0001": prio("low", 38.3, 8.1, False), "CVE-2026-0002": prio("critical", 85.0, 7.5, True)}
+    async with httpx.AsyncClient() as c:
+        scan = await scan_dependencies({"requirements.txt": "x==1.0.0\n"}, Fetcher(c, retries=0), triage)
+    by = {f.detail["osv_id"]: f for f in scan.findings}
+    assert by["GHSA-hi"].severity == "high" and by["GHSA-hi"].detail["risk_priority"] == "low" and by["GHSA-hi"].detail["cvss_severity"] == "high"
+    assert by["GHSA-kev"].severity == "critical"                       # exploitation evidence raises a CVSS-high flaw
+    assert [f.detail["osv_id"] for f in scan.findings] == ["GHSA-kev", "GHSA-hi"]   # order = risk score

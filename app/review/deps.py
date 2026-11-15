@@ -16,12 +16,14 @@ from app.models import Finding as TriageFinding
 from app.models import Priority
 from app.review.findings import SEV_SCORE, Finding
 from app.sources.base import Fetcher, SourceError
+from app.sources.nvd import severity_from_score
 
 OSV_BATCH = "https://api.osv.dev/v1/querybatch"
 OSV_VULN = "https://api.osv.dev/v1/vulns/{id}"
 MAX_PACKAGES = 600
 MAX_DETAIL_IDS = 40
 MAX_TRIAGE_CVES = 20
+_ORDER = ["critical", "high", "medium", "low", "info"]
 GHSA_SEV = {"CRITICAL": "critical", "HIGH": "high", "MODERATE": "medium", "MEDIUM": "medium", "LOW": "low"}
 
 Pkg = tuple[str, str, str, str]  # ecosystem, name, version, manifest path
@@ -202,9 +204,15 @@ async def scan_packages(pkgs: list[Pkg], unpinned: int, manifests: list[str], fe
             p = prios.get(c)
             if p and p.status == "scored" and (best is None or (p.risk_score or 0) > (best.risk_score or 0)):
                 best = p
-        sev = best.priority if best else (d.label or "medium")
-        if sev == "insufficient_evidence":
-            sev = d.label or "medium"
+        risk_pri = best.priority if best else None
+        if risk_pri == "insufficient_evidence":
+            risk_pri = None
+        cvss = best.signals["cvss"]["score"] if best else None
+        band = severity_from_score(cvss)
+        # `severity` = the higher of the CVSS band and the exploitation-aware priority, so a CVSS 8.1 never reads "low";
+        # the fix-first ORDER still follows the risk score, and both inputs stay visible in `detail`.
+        cands = [x for x in (band if band != "none" else None, risk_pri, None if (band or risk_pri) else (d.label or "medium")) if x]
+        sev = min(cands, key=lambda x: _ORDER.index(x))
         score = float(best.risk_score) if best and best.risk_score is not None else float(SEV_SCORE.get(sev, 45))
         pk = d.packages[0]
         fixed = d.fixed.get(pk[0].lower(), [])
@@ -219,7 +227,7 @@ async def scan_packages(pkgs: list[Pkg], unpinned: int, manifests: list[str], fe
             score=score, confidence="high" if best else "medium",
             evidence=[{"path": p[2], "package": f"{p[0]}@{p[1]}"} for p in d.packages[:3]],
             cves=d.cves, tags=(["CISA-KEV"] if kev else []),
-            detail={"osv_id": vid, **({"cvss_base_score": best.signals["cvss"]["score"], "epss": best.signals["epss"]["probability"], "kev_listed": kev,
+            detail={"osv_id": vid, "cvss_severity": band, "risk_priority": risk_pri, **({"cvss_base_score": best.signals["cvss"]["score"], "epss": best.signals["epss"]["probability"], "kev_listed": kev,
                                       "why": why} if best else {"note": "No CVE alias scored; severity from the advisory label."})}))
     scan.findings.sort(key=lambda f: -f.score)
     return scan
