@@ -1,0 +1,20 @@
+# Render blueprint. NOTE: Render Free instances sleep after ~15 min idle and have an ephemeral disk.
+# Telegraph runs liveness spot checks ~hourly and revokes routing after consecutive failures, so a
+# sleeping instance can cost you traffic. Use at least the "starter" plan (always on) for the real run.
+services:
+  - type: web
+    name: vulnrank
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: NVD_API_KEY
+        sync: false   # optional but strongly recommended: ~10x NVD rate limit, much faster warm-up
+      - key: CACHE_DB_PATH
+        value: /tmp/vulnrank-cache.sqlite3   # cache only; rebuilt after restart
+      - key: REQUEST_DEADLINE_SEC
+        value: "12"

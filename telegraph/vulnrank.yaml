@@ -1,0 +1,130 @@
+# VulnRank - Telegraph miner manifest (YAML Miner Standard, version "1").
+# Replace base_url with the deployed HTTPS URL before registering. A YAML is public and pinned
+# on-chain: it contains no secrets (this miner needs no API key from callers).
+# Validate at https://anjoman.ai/dashboard/earn BEFORE registering (registration cannot be edited).
+version: "1"
+kind: miner
+id: 7310099
+slug: vulnrank-triage
+protocol: generic
+name: VulnRank - Evidence-Backed Vulnerability Triage
+description: >-
+  Prioritises detected vulnerabilities. For each CVE returns the NVD primary CVSS v3.1 base score
+  (cvss_base_score) together with CISA KEV status, FIRST EPSS exploitation probability, asset-aware
+  risk score, priority, rationale, remediation and explicit uncertainty. Accepts one CVE or several
+  (ranked into a remediation queue). Deterministic scoring, no language model; unavailable sources are
+  reported as unavailable, never as a negative result.
+base_url: https://REPLACE-WITH-DEPLOYED-URL
+
+endpoints:
+  - path: /vuln-triage
+    external_path: /vuln-triage
+    method: GET
+    description: >-
+      Triage one or more already-detected CVEs. Returns cvss_base_score (NVD primary CVSS v3.1, 0-10) of the
+      highest-priority CVE plus a ranked list of all supplied CVEs with CISA KEV, EPSS, risk score, priority,
+      reasons and recommended action. Optional asset context (criticality, internet exposure, environment)
+      adjusts the ranking. Use for ranking/prioritising findings, not for scanning code or hosts.
+    intents: [VULNERABILITY_TRIAGE_GENERAL]
+    params:
+      query:
+        required:
+          - name: cve_id
+            type: string
+            intents: ["*"]
+            description: >-
+              CVE identifier such as CVE-2021-44228 (format CVE-YYYY-NNNN, 4 to 19 digits after the year).
+              Several identifiers may be given separated by commas to rank them against each other.
+        optional:
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim. Any CVE identifiers in it are also triaged, and phrases such as internet-facing or production are used as asset context."
+          - name: criticality
+            type: string
+            intents: ["*"]
+            description: "Business criticality of the affected asset."
+            accepted_fields:
+              - { value: critical, intents: ["*"], description: Business-critical asset. }
+              - { value: high, intents: ["*"], description: High-value asset. }
+              - { value: medium, intents: ["*"], description: Normal asset. }
+              - { value: low, intents: ["*"], description: Low-value or disposable asset. }
+          - name: internet_exposed
+            type: boolean
+            intents: ["*"]
+            description: "true if the affected asset is reachable from the internet, false if internal only."
+          - name: environment
+            type: string
+            intents: ["*"]
+            description: "Environment of the affected asset."
+            accepted_fields:
+              - { value: production, intents: ["*"], description: Production. }
+              - { value: staging, intents: ["*"], description: Staging. }
+              - { value: development, intents: ["*"], description: Development. }
+              - { value: test, intents: ["*"], description: Test or QA. }
+
+input_schema:
+  type: object
+  required: [cve_id]
+  properties:
+    cve_id:
+      type: string
+    question: { type: string, maxLength: 4000 }
+    criticality: { type: string, enum: [critical, high, medium, low] }
+    internet_exposed: { type: boolean }
+    environment: { type: string, enum: [production, staging, development, test] }
+
+output_schema:
+  type: object
+  properties:
+    cve_id: { type: string }
+    cvss_base_score:
+      type: [number, "null"]
+      minimum: 0
+      maximum: 10
+      description: NVD primary CVSS v3.1 base score of the top-priority CVE. Never an EPSS value.
+    answer: { type: string }
+    cvss_is_nvd_primary: { type: boolean }
+    severity: { type: string }
+    priority: { type: string, enum: [critical, high, medium, low, insufficient_evidence] }
+    risk_score: { type: [number, "null"] }
+    confidence: { type: number }
+    kev_listed: { type: [boolean, "null"] }
+    epss_probability: { type: [number, "null"] }
+    summary: { type: string }
+    ranking: { type: array }
+
+intent_mapping:
+  VULNERABILITY_TRIAGE_GENERAL:
+    endpoint: /vuln-triage
+    input:
+      cve_id: { from: cve_id, how: "Canonical CVE id(s) in upper case, comma separated when several." }
+    output:
+      cvss_base_score: { path: cvss_base_score }
+
+semantics:
+  signal_mapping:
+    label_field: priority
+    confidence_field: confidence
+    reason_field: summary
+  supported_intents:
+    - VULNERABILITY_TRIAGE_GENERAL
+
+limitations:
+  - code: MAX_PARAM_LENGTH
+    message: "cve_id accepts at most 100 CVE identifiers per request."
+    param: cve_id
+    property: length
+    value_num: 2500
+    operator: lte
+
+errors:
+  message_path: message
+
+rate_limit_per_sec: 5
+cache_ttl_sec: 0
+circuit_threshold: 5
+circuit_cooldown_seconds: 30
+
+docs:
+  repository: https://github.com/REPLACE-WITH-OWNER/vulnrank
