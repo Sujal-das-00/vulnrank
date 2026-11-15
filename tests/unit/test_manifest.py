@@ -21,9 +21,22 @@ def test_closed_set_keys():
 
 
 def test_intent_is_canonical_and_consistent():
-    assert M["semantics"]["supported_intents"] == ["VULNERABILITY_TRIAGE_GENERAL"]
+    assert M["semantics"]["supported_intents"] == ["VULNERABILITY_TRIAGE_GENERAL", "SECURITY_REVIEW_GENERAL"]
     assert all(set(e["intents"]) <= set(M["semantics"]["supported_intents"]) for e in M["endpoints"])
-    assert set(M["intent_mapping"]) <= set(M["semantics"]["supported_intents"])
+    assert set(M["intent_mapping"]) == set(M["semantics"]["supported_intents"])
+    paths = {e["path"]: e for e in M["endpoints"]}
+    for intent, m in M["intent_mapping"].items():            # every mapping points at a declared endpoint that serves that intent
+        assert m["endpoint"] in paths and intent in paths[m["endpoint"]]["intents"]
+        declared = {p["name"] for where in paths[m["endpoint"]]["params"].values() for grp in where.values() for p in grp}
+        assert set(m["input"]) <= declared
+
+
+def test_security_review_mapping_matches_intent_contract():
+    m = M["intent_mapping"]["SECURITY_REVIEW_GENERAL"]
+    # every field of the intent's response format must be mapped, or the node reports it `missing`
+    assert set(m["output"]) == {"verdict", "vulnerability_count", "issues", "summary"} and m["output"]["verdict"]["path"] == "verdict"
+    assert m["output"]["issues"]["path"] == "issues[]"
+    assert "required" not in M["input_schema"]          # two endpoints with different request shapes
 
 
 def test_kebab_slug_and_scored_field():

@@ -1,0 +1,313 @@
+# Launch-review rules table. DATA, not code: every legal statement the service makes comes from here.
+# Each rule fires from *evidence signals* (see evidence.py). A fired rule means "not detected / needs attention",
+# never "violation": a policy may live in a tool we cannot see. Not legal advice; counsel must confirm.
+#
+# verification:  checked   = confirmed against published sources while writing this table (see `note`)
+#                knowledge = from general legal knowledge, NOT re-checked: treat as a lead for counsel
+# effective_from: ISO date; before it the rule is reported as "upcoming" (not failing).
+as_of: "2026-11-16"
+disclaimer: >-
+  Automated, evidence-based checklist for launch planning. It is not legal advice and not a compliance certification.
+  "Not detected" means the scan found no evidence; the control may exist where this scan cannot see (third-party tools,
+  other repositories, offline processes). Penalty figures are statutory ceilings, never predictions of a fine.
+
+regimes:
+  gdpr:
+    name: EU General Data Protection Regulation (Regulation (EU) 2016/679)
+    ceiling: >-
+      Art. 83(4) (incl. Art. 32 security of processing): up to EUR 10 million or 2% of worldwide annual turnover, whichever is higher.
+      Art. 83(5) (principles, consent, data-subject rights, transparency): up to EUR 20 million or 4%.
+    url: https://eur-lex.europa.eu/eli/reg/2016/679/oj
+    verification: knowledge
+  eprivacy:
+    name: ePrivacy Directive 2002/58/EC, Art. 5(3) (cookies and similar technologies)
+    ceiling: Set by each Member State; where personal data is processed the GDPR ceilings above can also apply.
+    url: https://eur-lex.europa.eu/eli/dir/2002/58/oj
+    verification: knowledge
+  ecommerce_dir:
+    name: E-Commerce Directive 2000/31/EC, Art. 5 (general information to be provided)
+    ceiling: Set by each Member State (many also require a national "imprint", e.g. Germany).
+    url: https://eur-lex.europa.eu/eli/dir/2000/31/oj
+    verification: knowledge
+  crd:
+    name: Consumer Rights Directive 2011/83/EU (as amended by Directive (EU) 2023/2673)
+    ceiling: Set by each Member State; national transposition of the 2023 amendment varies, so check each market you sell into.
+    url: https://eur-lex.europa.eu/eli/dir/2011/83/oj
+    verification: checked
+  eaa:
+    name: European Accessibility Act, Directive (EU) 2019/882
+    ceiling: Set by each Member State. Applies to e-commerce services from 28 June 2025; a microenterprise exemption exists for services (national rules differ).
+    url: https://eur-lex.europa.eu/eli/dir/2019/882/oj
+    verification: checked
+  dpdp:
+    name: India Digital Personal Data Protection Act 2023 and DPDP Rules 2025
+    ceiling: >-
+      Act Schedule: up to INR 250 crore for failing to take reasonable security safeguards against a personal-data breach;
+      up to INR 200 crore for failing to notify a breach or for breaches of children's-data duties; up to INR 50 crore for other contraventions.
+    url: https://static.pib.gov.in/WriteReadData/specificdocs/documents/2025/nov/doc20251117695301.pdf
+    verification: checked
+    note: Rules notified 14 Nov 2025 with phased commencement; notice, consent and security duties apply in full about 18 months later.
+  india_ecom:
+    name: Consumer Protection (E-Commerce) Rules, 2020 (under the Consumer Protection Act 2019; amended 2026)
+    ceiling: Enforced under the Consumer Protection Act 2019 by the consumer authorities; no single statutory ceiling is stated here.
+    url: https://taxguru.in/wp-content/uploads/2020/07/Consumer-Protection-E-Commerce-Rules-2020.pdf
+    verification: checked
+    note: Sub-rules of Rule 4 were substituted by a 2026 amendment, so this table cites the rule, not a sub-rule; confirm the current text in the Gazette (original GSR 462(E), 23 July 2020).
+  ccpa:
+    name: California Consumer Privacy Act / CPRA (Cal. Civ. Code 1798.100 ff.)
+    ceiling: >-
+      Administrative fines up to USD 2,663 per violation, USD 7,988 if intentional or involving minors under 16 (CPI-adjusted, effective 1 Jan 2025;
+      next adjustment Jan 2027). Data-breach private action (Civ. Code 1798.150): USD 107 to 799 per consumer per incident or actual damages.
+      Applies to businesses over the revenue/volume thresholds (annual gross revenue above USD 26.625 million, or 100,000+ consumers/households, or 50%+ of revenue from selling/sharing data).
+    url: https://cppa.ca.gov/announcements/2024/20241217.html
+    verification: checked
+  caloppa:
+    name: California Online Privacy Protection Act (Cal. Bus. & Prof. Code 22575)
+    ceiling: Enforced through California unfair-competition law; no fixed ceiling stated here.
+    url: https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=22575
+    verification: knowledge
+  canspam:
+    name: CAN-SPAM Act (15 U.S.C. 7701 ff.)
+    ceiling: Civil penalty per non-compliant email, adjusted for inflation each year by the FTC (USD 53,088 under the 2025 adjustment; confirm the current figure).
+    url: https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business
+    verification: checked
+    note: Penalty figure confirmed only from secondary sources.
+  cal_arl:
+    name: California Automatic Renewal Law (Cal. Bus. & Prof. Code 17600 ff.)
+    ceiling: Enforced under California consumer-protection law; remedies vary. The FTC "click-to-cancel" rule was vacated in July 2025, but ROSCA and state laws still apply.
+    url: https://california.public.law/codes/business_and_professions_code_section_17602
+    verification: checked
+  pci:
+    name: PCI DSS (industry standard, not a statute)
+    ceiling: Consequences are contractual and imposed through your acquirer and the card brands; not set by law.
+    url: https://www.pcisecuritystandards.org/
+    verification: knowledge
+
+rules:
+  # ---------------------------------------------------------------- EU
+  - id: eu-privacy-notice
+    check: Privacy notice published
+    jurisdictions: [eu]
+    sectors: [saas, ecommerce]
+    regime: gdpr
+    cite: "GDPR Art. 13-14 (information to data subjects)"
+    severity: high
+    absent: [privacy_policy]
+    title: No privacy notice detected
+    fix: Publish a privacy notice (controller identity, purposes, legal bases, recipients, retention, data-subject rights, complaint route) and link it from the footer and every sign-up or checkout form.
+
+  - id: eu-cookie-consent
+    check: Consent before non-essential trackers
+    jurisdictions: [eu]
+    sectors: [saas, ecommerce]
+    regime: eprivacy
+    cite: "ePrivacy Directive Art. 5(3) with GDPR Art. 6-7 (prior consent for non-essential cookies/trackers)"
+    severity: high
+    present: [trackers]
+    absent: [cookie_consent]
+    title: Analytics/advertising trackers found but no consent mechanism detected
+    fix: Do not load non-essential trackers until the visitor opts in; add a consent banner (or consent-management platform) with equal-prominence accept and reject, and record the choice.
+
+  - id: eu-provider-identity
+    check: Provider identification (legal notice / imprint)
+    jurisdictions: [eu]
+    sectors: [saas, ecommerce]
+    regime: ecommerce_dir
+    cite: "E-Commerce Directive Art. 5 (name, geographic address, email address; VAT and register details where applicable)"
+    severity: medium
+    absent: [provider_identity]
+    title: No provider identification (legal notice/imprint) detected
+    fix: Add a legal-notice or imprint page with the legal entity name, registered address, a working email address, and company-register and VAT numbers where they exist.
+
+  - id: eu-terms
+    check: Terms of service / sale available
+    jurisdictions: [eu]
+    sectors: [saas, ecommerce]
+    regime: crd
+    cite: "Consumer Rights Directive Art. 6 (pre-contractual information) - contract terms must be available to consumers"
+    severity: medium
+    absent: [terms]
+    title: No terms of service / terms of sale detected
+    fix: Publish terms of service (or sale) and show them, with a link, before the customer commits to the purchase or subscription.
+
+  - id: eu-withdrawal-info
+    check: Return and 14-day withdrawal information
+    jurisdictions: [eu]
+    sectors: [ecommerce]
+    regime: crd
+    cite: "Consumer Rights Directive Art. 6(1)(h), Art. 9 (14-day right of withdrawal; model withdrawal form in Annex I(B))"
+    severity: high
+    absent: [refund_policy]
+    title: No refund / return / right-of-withdrawal information detected
+    fix: Publish a returns and withdrawal page explaining the 14-day right of withdrawal, how to exercise it, who pays return costs and the refund timeline; include the model withdrawal form.
+
+  - id: eu-withdrawal-function
+    check: Online withdrawal function at checkout
+    jurisdictions: [eu]
+    sectors: [ecommerce]
+    regime: crd
+    cite: "Consumer Rights Directive Art. 11a (electronic withdrawal function), inserted by Directive (EU) 2023/2673"
+    severity: medium
+    effective_from: "2026-06-19"
+    present: [checkout]
+    absent: [withdrawal_function]
+    confidence: low
+    title: Checkout found but no online "withdraw from contract" function detected
+    fix: Add a clearly labelled withdrawal button/page reachable without logging in, that lets the consumer state their intention to withdraw and returns an acknowledgement on a durable medium. Check each Member State's transposition.
+
+  - id: eu-data-rights
+    check: Data export / deletion for user accounts
+    jurisdictions: [eu]
+    sectors: [saas, ecommerce]
+    regime: gdpr
+    cite: "GDPR Art. 15-17, 20 (access, rectification, erasure, portability)"
+    severity: medium
+    present: [user_accounts]
+    absent: [data_rights]
+    title: User accounts found but no data export/deletion capability detected
+    fix: Provide a self-service or documented way to export and delete a user's data, and a contact route for access requests, answering within one month.
+
+  - id: eu-accessibility
+    check: Basic accessibility markup
+    jurisdictions: [eu]
+    sectors: [ecommerce]
+    regime: eaa
+    cite: "European Accessibility Act (Directive (EU) 2019/882), EN 301 549 / WCAG 2.1 AA for e-commerce services"
+    severity: medium
+    present: [a11y_gaps]
+    confidence: low
+    title: Basic accessibility gaps detected in page markup
+    fix: Declare the page language, give meaningful images alt text, and run a WCAG 2.1 AA audit. Check whether the microenterprise exemption applies to you in your Member State.
+
+  # ---------------------------------------------------------------- India
+  - id: in-privacy-notice
+    check: Privacy notice published
+    jurisdictions: [india]
+    sectors: [saas, ecommerce]
+    regime: dpdp
+    cite: "DPDP Act 2023 s.5 (notice before or at the time of seeking consent)"
+    severity: high
+    effective_from: "2027-05-14"
+    absent: [privacy_policy]
+    title: No privacy notice detected
+    fix: Publish a notice listing the personal data collected, purposes, how to exercise rights and complain, and how to withdraw consent; offer it in English or any Eighth Schedule language.
+
+  - id: in-consent
+    check: Consent before tracking
+    jurisdictions: [india]
+    sectors: [saas, ecommerce]
+    regime: dpdp
+    cite: "DPDP Act 2023 s.6 (free, specific, informed, unambiguous consent; withdrawal as easy as giving it)"
+    severity: medium
+    effective_from: "2027-05-14"
+    present: [trackers]
+    absent: [cookie_consent]
+    title: Trackers found but no consent mechanism detected
+    fix: Collect consent through a clear affirmative action before tracking, and provide an equally easy way to withdraw it.
+
+  - id: in-grievance-officer
+    check: Grievance officer details published
+    jurisdictions: [india]
+    sectors: [ecommerce]
+    regime: india_ecom
+    cite: "Consumer Protection (E-Commerce) Rules 2020, Rule 4 (grievance officer and redressal mechanism)"
+    severity: high
+    absent: [grievance_officer]
+    title: No grievance officer details detected
+    fix: Appoint a grievance officer and publish their name, designation and contact details on the site, with a complaint process that acknowledges within the prescribed time and resolves within the prescribed period (confirm the current 2026 timelines).
+
+  - id: in-return-refund-display
+    check: Return / refund / exchange information displayed
+    jurisdictions: [india]
+    sectors: [ecommerce]
+    regime: india_ecom
+    cite: "Consumer Protection (E-Commerce) Rules 2020, Rules 4-5 (display of return, refund, exchange, warranty, delivery and payment information)"
+    severity: high
+    absent: [refund_policy]
+    title: No return/refund/exchange information detected
+    fix: Display return, refund, exchange, warranty, delivery, shipment and payment-mode information clearly on the site, including the grievance mechanism.
+
+  - id: in-business-details
+    check: Business identification displayed
+    jurisdictions: [india]
+    sectors: [ecommerce]
+    regime: india_ecom
+    cite: "Consumer Protection (E-Commerce) Rules 2020, Rule 4 (details of the e-commerce entity must be displayed)"
+    severity: medium
+    absent: [provider_identity]
+    title: No business identification (legal name, address, contact) detected
+    fix: Show the legal name, registered address, and contact details (email, phone) of the entity operating the site.
+
+  # ---------------------------------------------------------------- US
+  - id: us-privacy-policy
+    check: Privacy policy published
+    jurisdictions: [us]
+    sectors: [saas, ecommerce]
+    regime: caloppa
+    cite: "CalOPPA (Cal. Bus. & Prof. Code 22575) and CCPA/CPRA notice duties (Civ. Code 1798.130)"
+    severity: high
+    absent: [privacy_policy]
+    title: No privacy policy detected
+    fix: Publish a conspicuously linked privacy policy covering categories of data collected, sources, purposes, disclosures, retention, and consumer rights (with request methods), updated at least every 12 months.
+
+  - id: us-do-not-sell
+    check: Opt-out of sale/sharing control
+    jurisdictions: [us]
+    sectors: [saas, ecommerce]
+    regime: ccpa
+    cite: "CCPA/CPRA (Civ. Code 1798.120, 1798.135: right to opt out of sale/sharing; honour Global Privacy Control)"
+    severity: medium
+    present: [trackers]
+    absent: [do_not_sell]
+    confidence: low
+    title: Advertising/analytics trackers found but no "Do Not Sell or Share" / privacy-choices control detected
+    fix: If CCPA applies to you (see thresholds), add a "Do Not Sell or Share My Personal Information" or "Your Privacy Choices" link and honour opt-out preference signals such as Global Privacy Control.
+
+  - id: us-can-spam
+    check: Unsubscribe in commercial email
+    jurisdictions: [us]
+    sectors: [saas, ecommerce]
+    regime: canspam
+    cite: "CAN-SPAM Act, 15 U.S.C. 7704(a)(5) (opt-out mechanism and sender postal address in commercial email)"
+    severity: medium
+    present: [email_sending]
+    absent: [unsubscribe]
+    title: Email-sending code found but no unsubscribe mechanism detected
+    fix: Include a working one-click unsubscribe and your valid postal address in every commercial email, and honour opt-outs within 10 business days.
+
+  - id: us-cancel-online
+    check: Self-service subscription cancellation
+    jurisdictions: [us]
+    sectors: [saas, ecommerce]
+    regime: cal_arl
+    cite: "California Automatic Renewal Law, Bus. & Prof. Code 17602 (online sign-up requires easy online cancellation)"
+    severity: high
+    present: [subscriptions]
+    absent: [cancel_flow]
+    title: Subscription billing found but no self-service cancellation detected
+    fix: Let customers cancel online in a way at least as easy as signing up (e.g. a billing portal), disclose renewal terms clearly before purchase, and send renewal reminders where required.
+
+  # ---------------------------------------------------------------- any jurisdiction
+  - id: any-pci-raw-card
+    check: Card data kept off your servers
+    jurisdictions: [eu, india, us]
+    sectors: [saas, ecommerce]
+    regime: pci
+    cite: "PCI DSS (card data must not touch your servers unless you are in PCI scope)"
+    severity: high
+    present: [raw_card_fields]
+    title: Code appears to handle raw card numbers or CVV directly
+    fix: Use a hosted payment form or tokenisation (e.g. Stripe Elements/Checkout, Razorpay Checkout) so card data never reaches your servers; otherwise you take on full PCI DSS scope.
+
+  - id: any-contact-consistency
+    check: Consistent business contact addresses
+    exposure: false   # heuristic, not a legal duty: never contributes a penalty ceiling
+    jurisdictions: [eu, india, us]
+    sectors: [saas, ecommerce]
+    regime: gdpr
+    cite: "Consistency heuristic supporting transparency duties (GDPR Art. 12-14, E-Commerce Directive Art. 5); not itself a legal requirement"
+    severity: low
+    present: [mixed_contacts]
+    confidence: low
+    title: Several different contact addresses (or free-mail contacts) found across the project
+    fix: Use one monitored business contact address per purpose (support, privacy, legal) on your own domain, consistently across the privacy notice, terms, footer and checkout.

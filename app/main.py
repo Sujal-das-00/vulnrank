@@ -25,6 +25,8 @@ from app.sources.cvedb import CveDbClient
 from app.sources.epss import EpssClient
 from app.sources.kev import KevClient
 from app.sources.nvd import NvdClient
+from app.review.netguard import SafeFetcher
+from app.review.service import ReviewService
 from app.triage import TriageService
 from app.warmer import warm_cache
 
@@ -65,11 +67,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         client = httpx.AsyncClient(headers={"User-Agent": "VulnRank/" + ENGINE_VERSION}, http2=False)
         svc, cache, fetcher = build_service(settings, client)
         app.state.svc, app.state.fetcher, app.state.started = svc, fetcher, time.time()
+        safe_client = httpx.AsyncClient(follow_redirects=False)
+        app.state.review = ReviewService(svc, fetcher, client, SafeFetcher(safe_client), settings)
+        app.state.review_slots = asyncio.Semaphore(2)
         warmer = asyncio.ensure_future(warm_cache(svc, settings)) if settings.warm_enabled else None
         yield
         if warmer:
             warmer.cancel()
         await client.aclose()
+        await safe_client.aclose()
 
     app = FastAPI(title="VulnRank", version=ENGINE_VERSION, lifespan=lifespan,
                   description="Evidence-backed vulnerability prioritisation (Telegraph miner).")
@@ -91,7 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/")
     async def root():
         return {"service": "VulnRank", "engine_version": ENGINE_VERSION, "score_version": SCORE_VERSION,
-                "intent": "VULNERABILITY_TRIAGE_GENERAL", "endpoints": ["/vuln-triage", "/v1/triage", "/v1/score-model", "/v1/sources/status", "/health"]}
+                "intent": "VULNERABILITY_TRIAGE_GENERAL", "endpoints": ["/vuln-triage", "/launch-review", "/v1/triage", "/v1/score-model", "/v1/sources/status", "/health"]}
 
     @app.get("/health")
     async def health():  # cheap: no external calls
@@ -125,6 +131,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resp = await svc.run(findings, request_id=body.request_id, errors=errors, top_n=body.preferences.top_n,
                              include_remediation=body.preferences.include_remediation, total_submitted=len(body.findings))
         return resp
+
+    @app.get("/launch-review")
+    async def launch_review(request: Request):
+        p = dict(request.query_params)
+        target = " ".join(str(p[k]) for k in ("target", "question", "query", "q", "repo", "url", "site") if p.get(k))[:2000]
+        slots: asyncio.Semaphore = request.app.state.review_slots
+        if slots.locked():
+            msg = "The reviewer is handling several launch reviews right now; please retry in a few seconds."
+            return {"verdict": None, "vulnerability_count": None, "issues": [], "summary": msg, "answer": msg, "status": "busy", "fix_first": []}
+        async with slots:
+            return await request.app.state.review.run(target, country=p.get("country") or p.get("countries") or p.get("jurisdiction"), sector=p.get("sector"))
 
     @app.get("/vuln-triage")
     async def telegraph_triage(request: Request):

@@ -12,8 +12,11 @@ description: >-
   Prioritises detected vulnerabilities. For each CVE returns the NVD primary CVSS v3.1 base score
   (cvss_base_score) together with CISA KEV status, FIRST EPSS exploitation probability, asset-aware
   risk score, priority, rationale, remediation and explicit uncertainty. Accepts one CVE or several
-  (ranked into a remediation queue). Deterministic scoring, no language model; unavailable sources are
-  reported as unavailable, never as a negative result.
+  (ranked into a remediation queue). Also performs a pre-launch review of a public GitHub repository and/or website for a
+  stated country (EU, India, US) and sector (SaaS, e-commerce): dependency CVEs ranked by real exploitation evidence,
+  leaked secrets, risky code patterns, security headers, and an evidence-based legal checklist with cited rules and
+  statutory penalty ceilings. Deterministic, no language model; unavailable sources are reported as unavailable, never
+  as a negative result, and "not detected" is never reported as a legal violation.
 base_url: https://REPLACE-WITH-DEPLOYED-URL
 
 endpoints:
@@ -63,12 +66,50 @@ endpoints:
               - { value: development, intents: ["*"], description: Development. }
               - { value: test, intents: ["*"], description: Test or QA. }
 
+  - path: /launch-review
+    external_path: /launch-review
+    method: GET
+    description: >-
+      Security review (and, for a repository or website, a pre-launch legal review) of pasted source code or a unified diff,
+      package versions such as lodash@4.17.15 or django==3.2.0, a PUBLIC GitHub repository, and/or a public website. Returns verdict
+      (Secure, Needs changes or Insecure), vulnerability_count, issues (CVE ids and weakness categories, most serious
+      first), a ranked fix-first list that merges vulnerable dependencies (scored with CISA KEV, EPSS and NVD), leaked
+      secrets, risky code patterns and site security headers with legal compliance gaps, and a cited legal checklist
+      for the countries given (EU, India, US) and sector (SaaS or e-commerce). Findings are evidence-based
+      ("not detected"), not legal advice. Use for reviewing code or a site before go-live, not for single CVE lookups.
+    intents: [SECURITY_REVIEW_GENERAL]
+    params:
+      query:
+        required:
+          - name: target
+            type: string
+            intents: ["*"]
+            description: >-
+              What to review, verbatim: pasted code or a unified diff, package versions (lodash@4.17.15, django==3.2.0, "lodash 4.17.15 on npm"),
+              a public GitHub repository (github.com/owner/repo) and/or a website URL. For a repository or website, countries and sector may be
+              added in the same text, e.g. "github.com/acme/shop eu india ecommerce".
+        optional:
+          - name: country
+            type: string
+            intents: ["*"]
+            description: "Countries or regions the product will operate in, comma separated: eu, india, us."
+          - name: sector
+            type: string
+            intents: ["*"]
+            description: "Business sector."
+            accepted_fields:
+              - { value: saas, intents: ["*"], description: Software-as-a-service or web application. }
+              - { value: ecommerce, intents: ["*"], description: Online shop or marketplace selling goods or services. }
+
 input_schema:
   type: object
-  required: [cve_id]
+  description: "Two endpoints with different request shapes. /vuln-triage takes cve_id; /launch-review takes target."
   properties:
     cve_id:
       type: string
+    target: { type: string, maxLength: 256 }
+    country: { type: string }
+    sector: { type: string, enum: [saas, ecommerce] }
     question: { type: string, maxLength: 4000 }
     criticality: { type: string, enum: [critical, high, medium, low] }
     internet_exposed: { type: boolean }
@@ -93,6 +134,11 @@ output_schema:
     epss_probability: { type: [number, "null"] }
     summary: { type: string }
     ranking: { type: array }
+    verdict: { type: [string, "null"], enum: [Secure, Needs changes, Insecure, null] }
+    vulnerability_count: { type: [integer, "null"], minimum: 0 }
+    issues: { type: array }
+    fix_first: { type: array }
+    launch_readiness: { type: string }
 
 intent_mapping:
   VULNERABILITY_TRIAGE_GENERAL:
@@ -101,6 +147,15 @@ intent_mapping:
       cve_id: { from: cve_id, how: "Canonical CVE id(s) in upper case, comma separated when several." }
     output:
       cvss_base_score: { path: cvss_base_score }
+  SECURITY_REVIEW_GENERAL:
+    endpoint: /launch-review
+    input:
+      target: { from: target, how: "What to review, verbatim: pasted code or diff, package versions, a GitHub repository or a website, including any country or sector words in the request." }
+    output:
+      verdict: { path: verdict }
+      vulnerability_count: { path: vulnerability_count }
+      issues: { path: "issues[]" }
+      summary: { path: summary }
 
 semantics:
   signal_mapping:
@@ -109,6 +164,7 @@ semantics:
     reason_field: summary
   supported_intents:
     - VULNERABILITY_TRIAGE_GENERAL
+    - SECURITY_REVIEW_GENERAL
 
 limitations:
   - code: MAX_PARAM_LENGTH

@@ -47,6 +47,7 @@ class Settings:
     ttl_not_found: int = 3600
     ttl_cvedb: int = 12 * 3600
     max_concurrency: int = 4
+    review_deadline_sec: float = 12.0  # overall budget for one /launch-review
     log_level: str = "INFO"
 
     @classmethod
@@ -58,6 +59,7 @@ class Settings:
             cache_db_path=db,
             max_batch_size=_int("MAX_BATCH_SIZE", 100),
             request_deadline_sec=_float("REQUEST_DEADLINE_SEC", 12.0),
+            review_deadline_sec=_float("REVIEW_DEADLINE_SEC", 12.0),
             nvd_rate_calls=50 if key else 5,
             warm_enabled=os.getenv("WARM_ENABLED", "1") != "0",
             log_level=os.getenv("LOG_LEVEL", "INFO"),

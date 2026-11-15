@@ -18,6 +18,7 @@ ALLOWED_HOSTS = frozenset(
         "www.cisa.gov",
         "api.first.org",
         "cvedb.shodan.io",
+        "api.osv.dev",
     }
 )
 
@@ -108,8 +109,10 @@ class Fetcher:
         headers: dict[str, str] | None = None,
         timeout: float = 6.0,
         deadline: float | None = None,
+        json_body: Any = None,
     ) -> tuple[int, Any]:
-        """Returns (status, parsed_json). 404 returns (404, None). Raises SourceError otherwise."""
+        """Returns (status, parsed_json). 404 returns (404, None). Raises SourceError otherwise.
+        With `json_body` the call is a POST (used for read-only batch queries such as OSV)."""
         parsed = urlparse(url)
         host = parsed.hostname or ""
         if parsed.scheme != "https" or host not in ALLOWED_HOSTS:
@@ -126,9 +129,12 @@ class Fetcher:
             eff_timeout = timeout if remaining is None else max(0.1, min(timeout, remaining))
             retry_after: float | None = None
             try:
-                resp = await self.client.get(
-                    url, params=params, headers=headers, timeout=eff_timeout, follow_redirects=False
-                )
+                if json_body is not None:
+                    resp = await self.client.post(url, json=json_body, headers=headers, timeout=eff_timeout, follow_redirects=False)
+                else:
+                    resp = await self.client.get(
+                        url, params=params, headers=headers, timeout=eff_timeout, follow_redirects=False
+                    )
                 if resp.status_code == 404:
                     self._record(host, True)
                     return 404, None

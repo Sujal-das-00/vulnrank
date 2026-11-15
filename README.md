@@ -63,3 +63,9 @@ Invalid items yield per-item `errors[]` (never silently dropped); duplicates of 
 * Render Free sleeps and has an ephemeral disk; Telegraph liveness spot checks can then fail. Cache is rebuilt after restart.
 * CVEDB fallback values are provisional and NVD may later differ. **Any CVE not already cached is answered from the CVEDB fallback on its first call (~1.5-3s, labelled provisional);** NVD fills the cache in the background, and the warmer pre-loads KEV-listed CVEs.
 * OSV / vendor-advisory enrichment from the blueprint is not implemented (needs package details; out of scope for the scored contract).
+
+
+## Launch review (second intent)
+`GET /launch-review` reviews a public GitHub repo and/or website for a stated country (EU, India, US) and sector (SaaS, e-commerce):
+dependency CVEs ranked by KEV/EPSS/NVD, secrets, risky code patterns, site security headers, and an evidence-based legal checklist with cited
+rules, merged into one fix-first list. See [docs/launch-review.md](docs/launch-review.md). It is served as `SECURITY_REVIEW_GENERAL` in `telegraph/vulnrank.yaml`.
