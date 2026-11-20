@@ -384,7 +384,6 @@ input_schema:
     text: { type: string }
     target_language: { type: string }
     source_language: { type: string }
-    country: { type: string }
     year_of_birth: { type: string }
     as_of: { type: string }
     registration_id: { type: string }
