@@ -7,7 +7,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -19,6 +19,17 @@ ALLOWED_HOSTS = frozenset(
         "api.first.org",
         "cvedb.shodan.io",
         "api.osv.dev",
+        # extra intents (app/intents): prices, weather, DNS-over-HTTPS and public JSON-RPC endpoints
+        "api.coinbase.com", "api.kraken.com",
+        "api.open-meteo.com", "geocoding-api.open-meteo.com",
+        "dns.google", "cloudflare-dns.com",
+        "ethereum-rpc.publicnode.com", "1rpc.io", "mainnet.base.org", "base-rpc.publicnode.com",
+        "arb1.arbitrum.io", "arbitrum-one-rpc.publicnode.com", "polygon-bor-rpc.publicnode.com", "polygon.drpc.org",
+        "mainnet.optimism.io", "optimism-rpc.publicnode.com",
+        # legal / compliance and NLP intents: sanctions lists, legal-entity and VAT registers, SEC EDGAR, translation
+        "www.treasury.gov", "sanctionslistservice.ofac.treas.gov", "wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com",
+        "scsanctions.un.org", "unsolprodfiles.blob.core.windows.net", "api.gleif.org", "ec.europa.eu", "www.sec.gov", "data.sec.gov",
+        "api.mymemory.translated.net",
     }
 )
 
@@ -113,6 +124,25 @@ class Fetcher:
     ) -> tuple[int, Any]:
         """Returns (status, parsed_json). 404 returns (404, None). Raises SourceError otherwise.
         With `json_body` the call is a POST (used for read-only batch queries such as OSV)."""
+        return await self._request(url, params, headers, timeout, deadline, json_body, "json")
+
+    async def get_text(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: float = 6.0,
+        deadline: float | None = None,
+        max_bytes: int = 25_000_000,
+    ) -> tuple[int, str | None]:
+        """Same guarantees as get_json for non-JSON bodies (CSV/XML sanctions lists). Oversized bodies are rejected."""
+        status, text = await self._request(url, params, headers, timeout, deadline, None, "text", redirects=2)
+        if text is not None and len(text) > max_bytes:
+            raise SourceError("malformed", f"{urlparse(url).hostname} body exceeds {max_bytes} bytes")
+        return status, text
+
+    async def _request(self, url, params, headers, timeout, deadline, json_body, mode: str, redirects: int = 0) -> tuple[int, Any]:
         parsed = urlparse(url)
         host = parsed.hostname or ""
         if parsed.scheme != "https" or host not in ALLOWED_HOSTS:
@@ -138,6 +168,11 @@ class Fetcher:
                 if resp.status_code == 404:
                     self._record(host, True)
                     return 404, None
+                loc = resp.headers.get("Location")
+                if resp.status_code in (301, 302, 303, 307, 308) and loc and redirects > 0:
+                    self._record(host, True)
+                    # a redirect is followed only to another allow-listed https host (checked on entry), never blindly
+                    return await self._request(urljoin(url, loc), None, headers, timeout, deadline, None, mode, redirects - 1)
                 if resp.status_code in self.RETRY_STATUS:
                     ra = resp.headers.get("Retry-After")
                     if ra and ra.strip().isdigit():
@@ -149,7 +184,7 @@ class Fetcher:
                     raise SourceError("http_error", f"{host} returned HTTP {resp.status_code}")
                 else:
                     try:
-                        data = resp.json()
+                        data = resp.json() if mode == "json" else resp.text
                     except ValueError:
                         self._record(host, False)
                         raise SourceError("malformed", f"{host} returned non-JSON body")

@@ -1,0 +1,616 @@
+# VulnRank - Telegraph miner manifest (YAML Miner Standard, version "1").
+# Replace base_url with the deployed HTTPS URL before registering. A YAML is public and pinned
+# on-chain: it contains no secrets (this miner needs no API key from callers).
+# Validate at https://anjoman.ai/dashboard/earn BEFORE registering (registration cannot be edited).
+version: "1"
+kind: miner
+id: 7310099
+slug: vulnrank-triage
+protocol: generic
+name: VulnRank - Security, Compliance and Verified Lookups
+description: >-
+  Fourteen intents, deterministic, no language model; a source that is unavailable is reported as unavailable, never as a negative
+  result. Security: CVE triage (NVD CVSS v3.1 score with CISA KEV, FIRST EPSS, asset-aware priority) and pre-launch security review
+  of code, packages, a public GitHub repository or website with a cited legal checklist. Legal and compliance: sanctions screening
+  (OFAC SDN and UN consolidated lists, fuzzy names and digital-currency addresses), legal-entity register records (GLEIF), vendor
+  verification (EU VAT via VIES, GLEIF, sanctions), SEC EDGAR filing monitoring, and obligation and deadline extraction from contract
+  text. Language: sentiment analysis (VADER lexicon, English) and translation (MyMemory; the text is sent to that service). Verified
+  lookups, each corroborated by two independent public sources: USD crypto price (Coinbase, Kraken), current city temperature
+  (Open-Meteo), gas price and transaction status on Ethereum, Base, Arbitrum, Polygon and Optimism (two public RPC operators), and
+  DNS record presence (Google Public DNS, Cloudflare). Screening and compliance output is evidence for human review, not legal advice.
+base_url: https://vulnrank.onrender.com
+
+endpoints:
+  - path: /vuln-triage
+    external_path: /vuln-triage
+    method: GET
+    description: >-
+      Triage one or more already-detected CVEs. Returns cvss_base_score (NVD primary CVSS v3.1, 0-10) of the
+      highest-priority CVE plus a ranked list of all supplied CVEs with CISA KEV, EPSS, risk score, priority,
+      reasons and recommended action. Optional asset context (criticality, internet exposure, environment)
+      adjusts the ranking. Use for ranking/prioritising findings, not for scanning code or hosts.
+    intents: [VULNERABILITY_TRIAGE_GENERAL]
+    params:
+      query:
+        required:
+          - name: cve_id
+            type: string
+            intents: ["*"]
+            description: >-
+              CVE identifier such as CVE-2021-44228 (format CVE-YYYY-NNNN, 4 to 19 digits after the year).
+              Several identifiers may be given separated by commas to rank them against each other.
+        optional:
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim. Any CVE identifiers in it are also triaged, and phrases such as internet-facing or production are used as asset context."
+          - name: criticality
+            type: string
+            intents: ["*"]
+            description: "Business criticality of the affected asset. Allowed values: critical, high, medium, low."
+          - name: internet_exposed
+            type: boolean
+            intents: ["*"]
+            description: "true if the affected asset is reachable from the internet, false if internal only."
+          - name: environment
+            type: string
+            intents: ["*"]
+            description: "Environment of the affected asset. Allowed values: production, staging, development, test."
+
+  - path: /launch-review
+    external_path: /launch-review
+    method: GET
+    description: >-
+      Security review (and, for a repository or website, a pre-launch legal review) of pasted source code or a unified diff,
+      package versions such as lodash@4.17.15 or django==3.2.0, a PUBLIC GitHub repository, and/or a public website. Returns verdict
+      (Secure, Needs changes or Insecure), vulnerability_count, issues (CVE ids and weakness categories, most serious
+      first), a ranked fix-first list that merges vulnerable dependencies (scored with CISA KEV, EPSS and NVD), leaked
+      secrets, risky code patterns and site security headers with legal compliance gaps, and a cited legal checklist
+      for the countries given (EU, India, US) and sector (SaaS or e-commerce). Findings are evidence-based
+      ("not detected"), not legal advice. Use for reviewing code or a site before go-live, not for single CVE lookups.
+    intents: [SECURITY_REVIEW_GENERAL]
+    params:
+      query:
+        required:
+          - name: target
+            type: string
+            intents: ["*"]
+            description: >-
+              What to review, verbatim: pasted code or a unified diff, package versions (lodash@4.17.15, django==3.2.0, "lodash 4.17.15 on npm"),
+              a public GitHub repository (github.com/owner/repo) and/or a website URL. For a repository or website, countries and sector may be
+              added in the same text, e.g. "github.com/acme/shop eu india ecommerce".
+        optional:
+          - name: country
+            type: string
+            intents: ["*"]
+            description: "Countries or regions the product will operate in, comma separated: eu, india, us."
+          - name: sector
+            type: string
+            intents: ["*"]
+            description: "Business sector. Allowed values: saas, ecommerce."
+
+  - path: /crypto-price
+    external_path: /crypto-price
+    method: GET
+    description: >-
+      Current price of a cryptocurrency in US dollars. Returns price_usd, the mean of the Coinbase and Kraken USD spot tickers when they
+      agree within 2 percent (otherwise null with status conflicting), with both quotes listed. Use for "what is the price of Bitcoin
+      in USD". Not for market cap, volume or history.
+    intents: [CRYPTO_PRICE_USD]
+    params:
+      query:
+        required:
+          - name: symbol
+            type: string
+            intents: ["*"]
+            description: "Asset ticker or name, for example BTC, ETH, SOL, XRP, DOGE, or Bitcoin."
+        optional:
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim; the asset is read from it when symbol is absent."
+
+  - path: /weather-temperature
+    external_path: /weather-temperature
+    method: GET
+    description: >-
+      Current air temperature at a named place anywhere in the world (Open-Meteo). Returns temperature_c in degrees Celsius plus
+      Fahrenheit, the resolved place and the observation time. Use for "what is the temperature in London right now". Not a forecast.
+    intents: [WEATHER_CHECK_TEMPERATURE]
+    params:
+      query:
+        required:
+          - name: location
+            type: string
+            intents: ["*"]
+            description: >-
+              City name, optionally with a state or country to disambiguate (London; Miami, Florida; Springfield, IL; Paris, France),
+              or latitude,longitude (51.5,-0.12).
+        optional:
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim; the place is read from it when location is absent."
+
+  - path: /gas-price
+    external_path: /gas-price
+    method: GET
+    description: >-
+      Current transaction gas price on a named blockchain network from two independent public RPC operators. Returns gas_price_gwei,
+      the chain, the block number, the EIP-1559 base fee and the native cost of a 21,000-gas transfer. Networks: Ethereum, Base,
+      Arbitrum, Polygon, Optimism. Not the price of the chain's token.
+    intents: [GAS_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Network: eth (Ethereum), base, arbitrum, polygon or optimism."
+        optional:
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim; the network is read from it when chain is absent."
+
+  - path: /tx-lookup
+    external_path: /tx-lookup
+    method: GET
+    description: >-
+      Details and status of an on-chain transaction from two independent public RPC operators. Returns status (confirmed, reverted,
+      pending or not_found), from, to, block_number, block_hash, value_eth, gas_used and confirmations. If chain is omitted the
+      transaction is searched on Ethereum, Base, Arbitrum, Polygon and Optimism. An RPC outage is reported as unavailable, never as
+      not_found. Requires a real 0x transaction hash.
+    intents: [ONCHAIN_TX_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: tx_hash
+            type: string
+            intents: ["*"]
+            description: "Transaction hash: 0x followed by 64 hexadecimal characters."
+        optional:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Network: eth, base, arbitrum, polygon or optimism. Searched across all of them when omitted."
+
+  - path: /dns-lookup
+    external_path: /dns-lookup
+    method: GET
+    description: >-
+      Whether a DNS name has records of a given type, as agreed by Google Public DNS and Cloudflare (DNS-over-HTTPS). Returns
+      has_record (true, false, or null when the resolvers disagree or fail), the records, TTL and whether the name exists (NXDOMAIN).
+      Record types: A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, SRV, PTR.
+    intents: [DNS_RECORD_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: name
+            type: string
+            intents: ["*"]
+            description: "Public DNS name, for example example.com or www.github.com."
+          - name: record_type
+            type: string
+            intents: ["*"]
+            description: "Record type: A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, SRV or PTR."
+
+  - path: /sanctions-screening
+    external_path: /sanctions-screening
+    method: GET
+    description: >-
+      Screen a person, company or digital-currency address against the OFAC SDN and UN Security Council consolidated sanctions lists,
+      including aliases and near-matches on spelling. Returns matched (true, false, or null when the lists could not be loaded),
+      verdict (match, potential_match, no_match), scored matches with list, program and reference, and the lists actually checked.
+      The EU and UK lists are not checked and the answer says so. A hit is a lead for human review, not a legal determination.
+    intents: [SANCTIONS_SCREENING_MATCH_GENERAL]
+    params:
+      query:
+        required:
+          - name: name
+            type: string
+            intents: ["*"]
+            description: "Person, company or wallet address to screen, optionally with context such as 'Ivan Petrov, DOB 1974, Cyprus'."
+        optional:
+          - name: country
+            type: string
+            intents: ["*"]
+            description: "Nationality or country, used to refine the match."
+          - name: year_of_birth
+            type: string
+            intents: ["*"]
+            description: "Four-digit birth year for an individual; a contradicting year lowers the match score."
+
+  - path: /corporate-registry
+    external_path: /corporate-registry
+    method: GET
+    description: >-
+      Official legal-entity record from GLEIF, the global Legal Entity Identifier register: legal name, registration number, active
+      status, legal address, jurisdiction, incorporation date and LEI. Directors and beneficial owners are not held by GLEIF and are
+      reported as not available. Entities without an LEI are reported as not found in GLEIF, which is not proof they do not exist.
+    intents: [CORPORATE_REGISTRY_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: company
+            type: string
+            intents: ["*"]
+            description: "Legal name of the company, or its 20-character LEI."
+        optional:
+          - name: jurisdiction
+            type: string
+            intents: ["*"]
+            description: "Country of the entity, name or ISO code (United Kingdom, GB, US, India), to disambiguate similar names."
+          - name: registration_id
+            type: string
+            intents: ["*"]
+            description: "National company registration number, if known."
+
+  - path: /vendor-verify
+    external_path: /vendor-verify
+    method: GET
+    description: >-
+      Combined supplier check from public evidence: EU VAT registration (VIES), legal-entity register status (GLEIF) and sanctions
+      screening (OFAC SDN, UN). Returns verdict (verified, needs_review or failed), valid (VAT validity), the registered name and
+      address, every check with its status and the checks that could not be made (bank account ownership, certifications). Not legal advice.
+    intents: [VENDOR_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: vendor
+            type: string
+            intents: ["*"]
+            description: "Legal name of the supplier."
+        optional:
+          - name: vat_number
+            type: string
+            intents: ["*"]
+            description: "EU VAT number with country prefix, for example DE123456789."
+
+  - path: /filing-monitor
+    external_path: /filing-monitor
+    method: GET
+    description: >-
+      SEC EDGAR filings for an issuer (company name, ticker or CIK): whether a form such as 10-K, 10-Q or 8-K was filed, how many
+      in a period, and the latest filing's date, acceptance time, report period, 8-K item meanings and URL. The filing text is not
+      read. Covers US-listed and SEC-registered issuers only.
+    intents: [REGULATORY_FILING_MONITOR_GENERAL]
+    params:
+      query:
+        required:
+          - name: entity
+            type: string
+            intents: ["*"]
+            description: "Issuer name, ticker (TSLA) or CIK."
+        optional:
+          - name: form
+            type: string
+            intents: ["*"]
+            description: "Form type, for example 10-K, 10-Q, 8-K, S-1, DEF 14A."
+          - name: period
+            type: string
+            intents: ["*"]
+            description: "Year (2026), quarter (Q1 2026), date range (2026-01-01 to 2026-06-30), 'since 2026-03-01' or 'last 90 days'."
+
+  - path: /contract-audit
+    external_path: /contract-audit
+    method: GET
+    description: >-
+      Extract the obligations in contract text: who must do what, deliverables, milestones, payment terms and amounts, and explicit or
+      relative deadlines, each classified as upcoming, past_due_date, undated or completed per the text. Rule-based, no language model.
+      Reports dates that have passed; it cannot know whether an obligation was actually performed. Not legal advice.
+    intents: [CONTRACT_OBLIGATION_AUDIT_GENERAL]
+    params:
+      query:
+        required:
+          - name: contract
+            type: string
+            intents: ["*"]
+            description: "The contract text (first 20000 characters are analysed)."
+        optional:
+          - name: as_of
+            type: string
+            intents: ["*"]
+            description: "Date to judge deadlines against, YYYY-MM-DD; today when omitted."
+
+  - path: /sentiment
+    external_path: /sentiment
+    method: GET
+    description: >-
+      Sentiment and emotional tone of English text using the VADER lexicon and rules (no language model, no external call). Returns
+      sentiment (positive, negative, neutral or mixed), a compound score from -1 to +1, the words that drove it, and a lower
+      confidence when the text does not look English.
+    intents: [SENTIMENT_ANALYSIS_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The text to analyse, for example a review or message."
+
+  - path: /translate
+    external_path: /translate
+    method: GET
+    description: >-
+      Translate text into a target language (MyMemory machine translation; the text is sent to that third-party service). The
+      source language is detected when not given. Returns the translation as the answer, the detected source language and a quality
+      score. Up to 1500 characters.
+    intents: [LANGUAGE_TRANSLATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "Text to translate."
+          - name: target_language
+            type: string
+            intents: ["*"]
+            description: "Target language name or code, for example French or fr."
+        optional:
+          - name: source_language
+            type: string
+            intents: ["*"]
+            description: "Source language name or code; detected when omitted."
+
+input_schema:
+  type: object
+  description: "Fourteen endpoints with different request shapes (cve_id, target, symbol, location, chain, tx_hash, name, company, vendor, entity, contract, text, ...)."
+  properties:
+    cve_id:
+      type: string
+    target: { type: string, maxLength: 256 }
+    country: { type: string }
+    sector: { type: string, enum: [saas, ecommerce] }
+    question: { type: string, maxLength: 4000 }
+    criticality: { type: string, enum: [critical, high, medium, low] }
+    internet_exposed: { type: boolean }
+    environment: { type: string, enum: [production, staging, development, test] }
+    symbol: { type: string }
+    location: { type: string }
+    chain: { type: string }
+    tx_hash: { type: string }
+    name: { type: string }
+    record_type: { type: string }
+    company: { type: string }
+    jurisdiction: { type: string }
+    vendor: { type: string }
+    vat_number: { type: string }
+    entity: { type: string }
+    form: { type: string }
+    period: { type: string }
+    contract: { type: string }
+    text: { type: string }
+    target_language: { type: string }
+    source_language: { type: string }
+    country: { type: string }
+    year_of_birth: { type: string }
+    as_of: { type: string }
+    registration_id: { type: string }
+
+output_schema:
+  type: object
+  properties:
+    cve_id: { type: string }
+    cvss_base_score:
+      type: [number, "null"]
+      minimum: 0
+      maximum: 10
+      description: NVD primary CVSS v3.1 base score of the top-priority CVE. Never an EPSS value.
+    answer: { type: string }
+    cvss_is_nvd_primary: { type: boolean }
+    severity: { type: string }
+    priority: { type: string, enum: [critical, high, medium, low, insufficient_evidence] }
+    risk_score: { type: [number, "null"] }
+    confidence: { type: number }
+    kev_listed: { type: [boolean, "null"] }
+    epss_probability: { type: [number, "null"] }
+    summary: { type: string }
+    ranking: { type: array }
+    verdict: { type: [string, "null"], description: "Security review: Secure, Needs changes, Insecure. Vendor: verified, needs_review, failed. Contract: obligations_found, past_due_dates_found, no_obligations_found. Sanctions: match, potential_match, no_match." }
+    vulnerability_count: { type: [integer, "null"], minimum: 0 }
+    issues: { type: array }
+    fix_first: { type: array }
+    launch_readiness: { type: string }
+    price_usd: { type: [number, "null"], description: "USD spot price (Coinbase and Kraken)." }
+    temperature_c: { type: [number, "null"], description: "Current air temperature, degrees Celsius." }
+    gas_price_gwei: { type: [number, "null"] }
+    chain: { type: [string, "null"] }
+    block_number: { type: [integer, "null"] }
+    status: { type: [string, "null"], description: "Transaction status: confirmed, reverted, pending, not_found." }
+    from: { type: [string, "null"] }
+    to: { type: [string, "null"] }
+    value_eth: { type: [number, "null"] }
+    has_record: { type: [boolean, "null"] }
+    matched: { type: [boolean, "null"], description: "Sanctions screening hit; null when the lists could not be loaded." }
+    match_count: { type: [integer, "null"] }
+    matches: { type: array }
+    highest_score: { type: [number, "null"] }
+    legal_name: { type: [string, "null"] }
+    registration_id: { type: [string, "null"] }
+    active: { type: [boolean, "null"] }
+    registered_address: { type: [string, "null"] }
+    incorporated: { type: [string, "null"] }
+    vendor: { type: [string, "null"] }
+    vat_number: { type: [string, "null"] }
+    valid: { type: [boolean, "null"] }
+    registered_name: { type: [string, "null"] }
+    entity: { type: [string, "null"] }
+    filing_count: { type: [integer, "null"] }
+    filings: { type: array }
+    urls: { type: array }
+    obligations: { type: array }
+    clauses: { type: array }
+    sentiment: { type: [string, "null"] }
+    score: { type: [number, "null"] }
+    translation: { type: [string, "null"] }
+    target_language: { type: [string, "null"] }
+    source_language: { type: [string, "null"] }
+    outcome: { type: string, description: "ok, or why no value was given (unavailable, conflicting, ...)." }
+
+intent_mapping:
+  VULNERABILITY_TRIAGE_GENERAL:
+    endpoint: /vuln-triage
+    input:
+      cve_id: { from: cve_id, how: "Canonical CVE id(s) in upper case, comma separated when several." }
+    output:
+      cvss_base_score: { path: cvss_base_score }
+  SECURITY_REVIEW_GENERAL:
+    endpoint: /launch-review
+    input:
+      target: { from: target, how: "What to review, verbatim: pasted code or diff, package versions, a GitHub repository or a website, including any country or sector words in the request." }
+    output:
+      verdict: { path: verdict }
+      vulnerability_count: { path: vulnerability_count }
+      issues: { path: "issues[]" }
+      summary: { path: summary }
+
+  CRYPTO_PRICE_USD:
+    endpoint: /crypto-price
+    input:
+      symbol: { from: symbol, how: "Asset ticker such as BTC, ETH or SOL, upper case." }
+    output:
+      price_usd: { path: price_usd, unit: "US dollars" }
+  WEATHER_CHECK_TEMPERATURE:
+    endpoint: /weather-temperature
+    input:
+      location: { from: location, how: "City name with optional state or country, or latitude,longitude." }
+    output:
+      temperature_c: { path: temperature_c, unit: "degrees Celsius" }
+  GAS_PRICE_GENERAL:
+    endpoint: /gas-price
+    input:
+      chain: { from: chain, how: "Network name: eth, base, arbitrum, polygon or optimism." }
+    output:
+      chain: { path: chain }
+      gas_price_gwei: { path: gas_price_gwei, unit: gwei }
+      as_of: { path: as_of }
+  ONCHAIN_TX_LOOKUP_GENERAL:
+    endpoint: /tx-lookup
+    input:
+      tx_hash: { from: tx_hash, how: "0x-prefixed 64 hex character transaction hash." }
+      chain: { from: chain, how: "Network name; omitted when the request does not name one." }
+    output:
+      tx_hash: { path: tx_hash }
+      status: { path: status }
+      from: { path: from }
+      to: { path: to }
+      block_number: { path: block_number, unit: "block height" }
+      value_eth: { path: value_eth, unit: "whole native units" }
+  DNS_RECORD_LOOKUP_GENERAL:
+    endpoint: /dns-lookup
+    input:
+      name: { from: name, how: "Public DNS name." }
+      record_type: { from: record_type, how: "A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, SRV or PTR." }
+    output:
+      has_record: { path: has_record }
+
+  SANCTIONS_SCREENING_MATCH_GENERAL:
+    endpoint: /sanctions-screening
+    input:
+      name: { from: name, how: "Person, company or wallet address, with any DOB or country context in the same text." }
+    output:
+      matched: { path: matched }
+      match_count: { path: match_count }
+      matches: { path: "matches[]" }
+      highest_score: { path: highest_score }
+  CORPORATE_REGISTRY_LOOKUP_GENERAL:
+    endpoint: /corporate-registry
+    input:
+      company: { from: company, how: "Company legal name or LEI." }
+      jurisdiction: { from: jurisdiction, how: "Country of the entity when stated." }
+    output:
+      legal_name: { path: legal_name }
+      registration_id: { path: registration_id }
+      active: { path: active }
+      jurisdiction: { path: jurisdiction }
+      registered_address: { path: registered_address }
+      incorporated: { path: incorporated }
+  VENDOR_VERIFY_GENERAL:
+    endpoint: /vendor-verify
+    input:
+      vendor: { from: vendor, how: "Supplier legal name." }
+      vat_number: { from: vat_number, how: "EU VAT number with country prefix, when given." }
+    output:
+      vendor: { path: vendor }
+      vat_number: { path: vat_number }
+      valid: { path: valid }
+      registered_name: { path: registered_name }
+      registered_address: { path: registered_address }
+      verdict: { path: verdict }
+  REGULATORY_FILING_MONITOR_GENERAL:
+    endpoint: /filing-monitor
+    input:
+      entity: { from: entity, how: "Issuer name, ticker or CIK." }
+      period: { from: period, how: "Period or date range when stated." }
+    output:
+      entity: { path: entity }
+      filing_count: { path: filing_count, unit: filings }
+      filings: { path: "filings[]" }
+      urls: { path: "urls[]" }
+  CONTRACT_OBLIGATION_AUDIT_GENERAL:
+    endpoint: /contract-audit
+    input:
+      contract: { from: contract, how: "The contract text, verbatim." }
+    output:
+      verdict: { path: verdict }
+      obligations: { path: "obligations[]" }
+      clauses: { path: "clauses[]" }
+      summary: { path: summary }
+  SENTIMENT_ANALYSIS_GENERAL:
+    endpoint: /sentiment
+    input:
+      text: { from: text, how: "The text to analyse, verbatim." }
+    output:
+      sentiment: { path: sentiment }
+      score: { path: score }
+  LANGUAGE_TRANSLATION_GENERAL:
+    endpoint: /translate
+    input:
+      text: { from: text, how: "The text to translate, verbatim." }
+      target_language: { from: target_language, how: "Target language name or code." }
+    output:
+      translation: { path: translation }
+      target_language: { path: target_language }
+      source_language: { path: source_language }
+
+semantics:
+  signal_mapping:
+    label_field: priority
+    confidence_field: confidence
+    reason_field: summary
+  supported_intents:
+    - VULNERABILITY_TRIAGE_GENERAL
+    - SECURITY_REVIEW_GENERAL
+    - CRYPTO_PRICE_USD
+    - WEATHER_CHECK_TEMPERATURE
+    - GAS_PRICE_GENERAL
+    - ONCHAIN_TX_LOOKUP_GENERAL
+    - DNS_RECORD_LOOKUP_GENERAL
+    - SANCTIONS_SCREENING_MATCH_GENERAL
+    - CORPORATE_REGISTRY_LOOKUP_GENERAL
+    - VENDOR_VERIFY_GENERAL
+    - REGULATORY_FILING_MONITOR_GENERAL
+    - CONTRACT_OBLIGATION_AUDIT_GENERAL
+    - SENTIMENT_ANALYSIS_GENERAL
+    - LANGUAGE_TRANSLATION_GENERAL
+
+limitations:
+  - code: MAX_PARAM_LENGTH
+    message: "cve_id accepts at most 100 CVE identifiers per request."
+    param: cve_id
+    property: length
+    value_num: 2500
+    operator: lte
+
+errors:
+  message_path: message
+
+rate_limit_per_sec: 5
+cache_ttl_sec: 0
+circuit_threshold: 5
+circuit_cooldown_seconds: 30
+
+docs:
+  repository: https://github.com/Sujal-das-00/vulnrank.git

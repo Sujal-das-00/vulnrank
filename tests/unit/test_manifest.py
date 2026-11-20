@@ -3,7 +3,9 @@ from pathlib import Path
 
 import yaml
 
-M = yaml.safe_load((Path(__file__).parents[2] / "telegraph" / "vulnrank.yaml").read_text())
+_DIR = Path(__file__).parents[2] / "telegraph"
+# the manifest currently lives in vulnrank-fixed.yaml (vulnrank.yaml was removed from the working tree); accept either name
+M = yaml.safe_load(next(p for p in (_DIR / "vulnrank-fixed.yaml", _DIR / "vulnrank.yaml") if p.exists()).read_text())
 
 ROOT_KEYS = {"version", "kind", "id", "slug", "protocol", "name", "description", "base_url", "input_schema", "output_schema",
              "intent_mapping", "polling", "cache_ttl_sec", "rate_limit_per_sec", "circuit_threshold", "circuit_cooldown_seconds",
@@ -21,7 +23,11 @@ def test_closed_set_keys():
 
 
 def test_intent_is_canonical_and_consistent():
-    assert M["semantics"]["supported_intents"] == ["VULNERABILITY_TRIAGE_GENERAL", "SECURITY_REVIEW_GENERAL"]
+    assert M["semantics"]["supported_intents"] == [
+        "VULNERABILITY_TRIAGE_GENERAL", "SECURITY_REVIEW_GENERAL", "CRYPTO_PRICE_USD", "WEATHER_CHECK_TEMPERATURE",
+        "GAS_PRICE_GENERAL", "ONCHAIN_TX_LOOKUP_GENERAL", "DNS_RECORD_LOOKUP_GENERAL",
+        "SANCTIONS_SCREENING_MATCH_GENERAL", "CORPORATE_REGISTRY_LOOKUP_GENERAL", "VENDOR_VERIFY_GENERAL", "REGULATORY_FILING_MONITOR_GENERAL",
+        "CONTRACT_OBLIGATION_AUDIT_GENERAL", "SENTIMENT_ANALYSIS_GENERAL", "LANGUAGE_TRANSLATION_GENERAL"]
     assert all(set(e["intents"]) <= set(M["semantics"]["supported_intents"]) for e in M["endpoints"])
     assert set(M["intent_mapping"]) == set(M["semantics"]["supported_intents"])
     paths = {e["path"]: e for e in M["endpoints"]}
@@ -48,3 +54,18 @@ def test_kebab_slug_and_scored_field():
 
 def test_no_secrets():
     assert "auth" not in M and "key" not in str(M).lower().replace("keyless", "")
+
+
+def test_extra_intent_mappings_point_at_real_response_fields():
+    graded = {"CRYPTO_PRICE_USD": ("price_usd",), "WEATHER_CHECK_TEMPERATURE": ("temperature_c",), "GAS_PRICE_GENERAL": ("gas_price_gwei",),
+              "ONCHAIN_TX_LOOKUP_GENERAL": ("status", "block_number", "value_eth"), "DNS_RECORD_LOOKUP_GENERAL": ("has_record",),
+              "SANCTIONS_SCREENING_MATCH_GENERAL": ("matched", "match_count", "highest_score"),
+              "CORPORATE_REGISTRY_LOOKUP_GENERAL": ("legal_name", "registration_id", "active", "registered_address", "incorporated"),
+              "VENDOR_VERIFY_GENERAL": ("valid", "registered_name", "verdict"), "REGULATORY_FILING_MONITOR_GENERAL": ("entity", "filing_count"),
+              "CONTRACT_OBLIGATION_AUDIT_GENERAL": ("verdict",), "SENTIMENT_ANALYSIS_GENERAL": ("sentiment", "score"),
+              "LANGUAGE_TRANSLATION_GENERAL": ("translation", "target_language", "source_language")}
+    for intent, fields in graded.items():
+        out = M["intent_mapping"][intent]["output"]
+        assert all(f in out and out[f]["path"] == f for f in fields), intent
+        assert all(f in M["output_schema"]["properties"] for f in fields), intent
+    assert len({m["endpoint"] for m in M["intent_mapping"].values()}) == len(M["intent_mapping"])  # one endpoint per intent

@@ -15,6 +15,10 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.cache import Cache
+from app.intents import (chain as chain_intents, contract as contract_intents, crypto as crypto_intents, dns as dns_intents,
+                         filings as filings_intents, registry as registry_intents, sanctions as sanctions_intents,
+                         sentiment as sentiment_intents, translate as translate_intents, vendor as vendor_intents,
+                         weather as weather_intents)
 from app.config import ENGINE_VERSION, SCORE_VERSION, Settings
 from app.inputs import findings_from_body, findings_from_query
 from app.models import RawTriageRequest
@@ -70,10 +74,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         safe_client = httpx.AsyncClient(follow_redirects=False)
         app.state.review = ReviewService(svc, fetcher, client, SafeFetcher(safe_client), settings)
         app.state.review_slots = asyncio.Semaphore(2)
+        app.state.sanctions = sanctions_intents.SanctionsIndex(fetcher)
+        sanctions_warm = asyncio.ensure_future(app.state.sanctions.ensure()) if settings.warm_enabled else None  # ~30 MB of lists, load before the first ask
         warmer = asyncio.ensure_future(warm_cache(svc, settings)) if settings.warm_enabled else None
         yield
         if warmer:
             warmer.cancel()
+        if sanctions_warm:
+            sanctions_warm.cancel()
         await client.aclose()
         await safe_client.aclose()
 
@@ -97,7 +105,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/")
     async def root():
         return {"service": "VulnRank", "engine_version": ENGINE_VERSION, "score_version": SCORE_VERSION,
-                "intent": "VULNERABILITY_TRIAGE_GENERAL", "endpoints": ["/vuln-triage", "/launch-review", "/v1/triage", "/v1/score-model", "/v1/sources/status", "/health"]}
+                "intent": "VULNERABILITY_TRIAGE_GENERAL", "intents": ["VULNERABILITY_TRIAGE_GENERAL", "SECURITY_REVIEW_GENERAL", "CRYPTO_PRICE_USD", "WEATHER_CHECK_TEMPERATURE",
+                                   "GAS_PRICE_GENERAL", "ONCHAIN_TX_LOOKUP_GENERAL", "DNS_RECORD_LOOKUP_GENERAL",
+                                   "SANCTIONS_SCREENING_MATCH_GENERAL", "CORPORATE_REGISTRY_LOOKUP_GENERAL", "VENDOR_VERIFY_GENERAL",
+                                   "REGULATORY_FILING_MONITOR_GENERAL", "CONTRACT_OBLIGATION_AUDIT_GENERAL", "SENTIMENT_ANALYSIS_GENERAL",
+                                   "LANGUAGE_TRANSLATION_GENERAL"],
+                "endpoints": ["/vuln-triage", "/launch-review", "/crypto-price", "/weather-temperature", "/gas-price", "/tx-lookup", "/dns-lookup", "/sanctions-screening",
+                              "/corporate-registry", "/vendor-verify", "/filing-monitor", "/contract-audit", "/sentiment", "/translate", "/v1/triage", "/v1/score-model", "/v1/sources/status", "/health"]}
 
     @app.get("/health")
     async def health():  # cheap: no external calls
@@ -120,7 +134,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/sources/status")
     async def sources_status(request: Request):
         f: Fetcher = request.app.state.fetcher
-        return {h: f.breaker_state(h) for h in ("services.nvd.nist.gov", "www.cisa.gov", "api.first.org", "cvedb.shodan.io")}
+        return {h: f.breaker_state(h) for h in ("services.nvd.nist.gov", "www.cisa.gov", "api.first.org", "cvedb.shodan.io", "api.coinbase.com", "api.kraken.com",
+                                                           "api.open-meteo.com", "dns.google", "cloudflare-dns.com")}
 
     @app.post("/v1/triage")
     async def triage(request: Request, body: RawTriageRequest):
@@ -142,6 +157,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {"verdict": None, "vulnerability_count": None, "issues": [], "summary": msg, "answer": msg, "status": "busy", "fix_first": []}
         async with slots:
             return await request.app.state.review.run(target, country=p.get("country") or p.get("countries") or p.get("jurisdiction"), sector=p.get("sector"))
+
+    def _extra(handler, *, ensure: dict[str, Any] | None = None):
+        async def endpoint(request: Request):
+            f: Fetcher = request.app.state.fetcher
+            deadline = time.monotonic() + settings.request_deadline_sec
+            out = await handler(f, dict(request.query_params), timeout=settings.source_timeout_sec, deadline=deadline)
+            for k, v in (ensure or {}).items():
+                out.setdefault(k, v)
+            return out
+        return endpoint
+
+    app.get("/crypto-price")(_extra(crypto_intents.lookup, ensure={"price_usd": None}))
+    app.get("/weather-temperature")(_extra(weather_intents.lookup, ensure={"temperature_c": None}))
+    app.get("/gas-price")(_extra(chain_intents.gas_price, ensure={"gas_price_gwei": None}))
+    app.get("/tx-lookup")(_extra(chain_intents.tx_lookup, ensure={"status": None}))
+    app.get("/dns-lookup")(_extra(dns_intents.lookup, ensure={"has_record": None}))
+
+    def _with_index(handler, ensure: dict[str, Any]):
+        async def endpoint(request: Request):
+            f: Fetcher = request.app.state.fetcher
+            deadline = time.monotonic() + settings.request_deadline_sec
+            args = (f, request.app.state.sanctions, dict(request.query_params)) if handler is vendor_intents.verify else (request.app.state.sanctions, dict(request.query_params))
+            kw = {"timeout": settings.source_timeout_sec, "deadline": deadline}
+            out = await handler(*args, **kw)
+            for k, v in ensure.items():
+                out.setdefault(k, v)
+            return out
+        return endpoint
+
+    app.get("/sanctions-screening")(_with_index(sanctions_intents.screen, {"matched": None}))
+    app.get("/vendor-verify")(_with_index(vendor_intents.verify, {"verdict": None}))
+    app.get("/corporate-registry")(_extra(registry_intents.lookup, ensure={"legal_name": None}))
+    app.get("/filing-monitor")(_extra(filings_intents.lookup, ensure={"filing_count": None}))
+    app.get("/translate")(_extra(translate_intents.run, ensure={"translation": None}))
+
+    @app.get("/sentiment")
+    async def sentiment(request: Request):
+        return {"sentiment": None, **sentiment_intents.run(dict(request.query_params))}
+
+    @app.api_route("/contract-audit", methods=["GET", "POST"])
+    async def contract_audit(request: Request):
+        params: dict[str, Any] = dict(request.query_params)
+        if request.method == "POST":  # contracts are long: allow the text in a JSON or form body
+            try:
+                body = await request.json()
+                params.update({k: v for k, v in body.items() if isinstance(v, (str, int, float))} if isinstance(body, dict) else {})
+            except ValueError:
+                params.update({k: v for k, v in (await request.form()).items() if isinstance(v, str)})
+        return {"verdict": None, **contract_intents.run(params)}
 
     @app.get("/vuln-triage")
     async def telegraph_triage(request: Request):

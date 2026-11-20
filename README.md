@@ -69,3 +69,37 @@ Invalid items yield per-item `errors[]` (never silently dropped); duplicates of 
 `GET /launch-review` reviews a public GitHub repo and/or website for a stated country (EU, India, US) and sector (SaaS, e-commerce):
 dependency CVEs ranked by KEV/EPSS/NVD, secrets, risky code patterns, site security headers, and an evidence-based legal checklist with cited
 rules, merged into one fix-first list. See [docs/launch-review.md](docs/launch-review.md). It is served as `SECURITY_REVIEW_GENERAL` in `telegraph/vulnrank.yaml`.
+
+## Extra intents (verified lookups)
+Five more intents, picked from the live Telegraph intent list by miner count (`/engine/v1/intents`) among those answerable keyless and
+deterministically. Each is corroborated by two independent public sources, always answers HTTP 200, and returns `null` plus an `outcome`
+(never a guess) when sources fail. Code: `app/intents/`; manifest entries in `telegraph/vulnrank-fixed.yaml`.
+
+| Intent (miners) | Endpoint | Graded field | Sources |
+|---|---|---|---|
+| `CRYPTO_PRICE_USD` (54) | `/crypto-price?symbol=ETH` | `price_usd` | Coinbase + Kraken (null if >2% apart) |
+| `WEATHER_CHECK_TEMPERATURE` (31) | `/weather-temperature?location=London` | `temperature_c` | Open-Meteo geocoder + forecast, worldwide |
+| `GAS_PRICE_GENERAL` (28) | `/gas-price?chain=base` | `gas_price_gwei` | two public RPC operators per chain |
+| `ONCHAIN_TX_LOOKUP_GENERAL` (28) | `/tx-lookup?tx_hash=0x...` | `status` | two RPC operators; chain auto-detected if omitted |
+| `DNS_RECORD_LOOKUP_GENERAL` (25) | `/dns-lookup?name=example.com&record_type=MX` | `has_record` | Google Public DNS + Cloudflare DoH |
+
+Chains: Ethereum, Base, Arbitrum, Polygon, Optimism. New upstream hosts are added to the allow-list in `app/sources/base.py`.
+Caveat: the leaderboard has no scored rows yet for `GAS_PRICE_GENERAL` and `DNS_RECORD_LOOKUP_GENERAL`, so they add coverage but cannot earn a #1 until scoring starts.
+
+## Legal / compliance and NLP intents (7 more, 14 in total)
+Chosen from the live intent list (miner counts in brackets); all deterministic, no language model, and every answer says what it did
+**not** check. Code in `app/intents/`, manifest entries in `telegraph/vulnrank-fixed.yaml`.
+
+| Intent (miners) | Endpoint | Graded fields | Sources |
+|---|---|---|---|
+| `SANCTIONS_SCREENING_MATCH_GENERAL` (28) | `/sanctions-screening?name=` | `matched`, `matches`, `highest_score` | OFAC SDN + UN consolidated lists (fuzzy names, aliases, DOB year, crypto addresses). EU/UK lists are **not** checked. |
+| `CORPORATE_REGISTRY_LOOKUP_GENERAL` (25) | `/corporate-registry?company=` | `legal_name`, `registration_id`, `active`, `registered_address`, `incorporated` | GLEIF (entities with an LEI only; no directors/owners) |
+| `VENDOR_VERIFY_GENERAL` (25) | `/vendor-verify?vendor=&vat_number=` | `verdict`, `valid`, `registered_name` | EU VIES VAT + GLEIF + sanctions; bank and certification checks are listed as not checked |
+| `REGULATORY_FILING_MONITOR_GENERAL` (22) | `/filing-monitor?entity=&form=&period=` | `filing_count`, `filings`, `urls` | SEC EDGAR submissions index (filing text is not read) |
+| `CONTRACT_OBLIGATION_AUDIT_GENERAL` (11) | `/contract-audit?contract=` (GET or POST) | `verdict`, `obligations`, `clauses` | Rule-based extraction; reports passed dates, cannot prove breach |
+| `SENTIMENT_ANALYSIS_GENERAL` (21) | `/sentiment?text=` | `sentiment`, `score` | VADER lexicon (English); local, nothing leaves the service |
+| `LANGUAGE_TRANSLATION_GENERAL` (22) | `/translate?text=&target_language=` | `translation` | MyMemory (the text is sent to that third party; free quota is limited) |
+
+Notes: the sanctions lists (~30 MB) are downloaded in the background at start-up and refreshed every 12 h; until loaded, the answer is
+`loading`/`unavailable` and never "clear". Redirects are followed only to allow-listed hosts. A sanctions hit is a lead for human review,
+not a legal determination. SEC requests use a descriptive `VulnRank/0.1` user agent and no personal contact details.

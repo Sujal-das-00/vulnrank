@@ -1,6 +1,6 @@
 """Telegraph transport adapter.
 
-Telegraph miners are plain HTTPS APIs described by a YAML manifest (telegraph/vulnrank.yaml); the
+Telegraph miners are plain HTTPS APIs described by a YAML manifest (telegraph/vulnrank-fixed.yaml, formerly vulnrank.yaml); the
 node maps the intent's typed request onto our GET endpoint and parses the response. For
 VULNERABILITY_TRIAGE_GENERAL the scored response field is `cvss_base_score`
 (NVD primary CVSS v3.1, 0-10), so it is always a top-level key, emitted first. Everything else is additive.
