@@ -56,7 +56,7 @@ async def _ask(f: Fetcher, label: str, url: str, name: str, rtype: str, timeout:
         raise SourceError("http_error", f"{label} returned DNS rcode {rcode}")
     want = TYPES[rtype]
     recs = [a for a in (js.get("Answer") or []) if a.get("type") == want]
-    return {"resolver": label, "nxdomain": rcode == 3, "records": sorted({str(a["data"])[:255] for a in recs}),
+    return {"resolver": label, "nxdomain": rcode == 3, "records": sorted({str(a["data"])[:2048] for a in recs}),
             "ttl": min((a.get("TTL", 0) for a in recs), default=None)}
 
 

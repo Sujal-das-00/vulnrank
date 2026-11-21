@@ -103,3 +103,30 @@ Chosen from the live intent list (miner counts in brackets); all deterministic, 
 Notes: the sanctions lists (~30 MB) are downloaded in the background at start-up and refreshed every 12 h; until loaded, the answer is
 `loading`/`unavailable` and never "clear". Redirects are followed only to allow-listed hosts. A sanctions hit is a lead for human review,
 not a legal determination. SEC requests use a descriptive `VulnRank/0.1` user agent and no personal contact details.
+
+## AI/language, blockchain and compliance intents (17 more, 31 in total, all declared in the manifest)
+Intent names, parameters and graded fields come from the Telegraph intent catalogue (`catalog/intents.json` in the
+[telegraphprotocol/bounties](https://github.com/telegraphprotocol/bounties) repo), so asks routed to those intents reach these endpoints.
+Caveat: when this was written the catalogue marked 7 of the 17 `onchain_ready: false` (no response format yet; `TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL`: no decimals): `KEYWORD_EXTRACTION`, `SEMANTIC_SIMILARITY`, `ENTITY_EXTRACTION`, `TEXT_SUMMARIZATION`, `TOKEN_TOTAL_SUPPLY_VERIFY`, `SMART_CONTRACT_AUDIT`, `PLAGIARISM_DETECTION`. They are declared anyway; if the node's validation rejects the YAML over them, remove their `endpoints`, `intent_mapping` and `supported_intents` entries. All answer HTTP 200 and return `null` plus an `outcome` instead of guessing. Code in `app/intents/`; tests in `tests/intents/test_new_intents.py`.
+
+| Group | Intent | Endpoint | Graded fields | Method / source |
+|---|---|---|---|---|
+| AI / ML | `TEXT_CLASSIFICATION_GENERAL` | `/text-classification` | `category`, `reason`, `confidence` | label + keyword overlap; null when no label is supported |
+| AI / ML | `KEYWORD_EXTRACTION_GENERAL` | `/keyword-extraction` | `keywords` | RAKE |
+| AI / ML | `SEMANTIC_SIMILARITY_GENERAL` | `/semantic-similarity` | `similarity`, `verdict` | TF cosine (lexical, not a neural embedding) |
+| AI / ML | `ENTITY_EXTRACTION_GENERAL` | `/entity-extraction` | `entities` (with offsets) | regex + gazetteer; person/org labels are heuristic |
+| AI / ML | `TEXT_SUMMARIZATION_GENERAL` | `/text-summarization` | `summary` | extractive, nothing added |
+| AI / ML | `LLM_OUTPUT_EVALUATION_GENERAL` | `/llm-evaluation` | `rating`, `score`, `strengths`, `errors` | structural checks; cannot verify facts |
+| AI / ML | `AI_TEXT_DETECTION_GENERAL` | `/ai-text-detection` | `verdict`, `ai_likelihood`, `cues` | stylometric heuristic, confidence capped at 0.6 |
+| Blockchain | `WALLET_BALANCE_CHECK_GENERAL` | `/wallet-balance` | `balance`, `token_symbol` | two RPC operators must agree (no ENS) |
+| Blockchain | `TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL` | `/token-supply` | `total_supply` | two RPC operators must agree |
+| Blockchain | `TVL_LOOKUP_GENERAL` | `/tvl` | `tvl_usd`, `chain_tvl_usd` | DefiLlama |
+| Blockchain | `CRYPTO_YIELD_RATE_GENERAL` | `/yield-rate` | `supply_apy` | DefiLlama pools |
+| Blockchain | `LIQUIDITY_DEPTH_VERIFY_GENERAL` | `/liquidity-depth` | `liquidity_usd` | DefiLlama pool TVL + constant-product slippage estimate |
+| Blockchain | `SMART_CONTRACT_AUDIT_GENERAL` | `/contract-source-audit` | `verdict`, `findings` | SWC pattern scan of Solidity source; never says "secure" |
+| Legal / compliance | `CONTENT_MODERATION_GENERAL` | `/content-moderation` | `verdict`, `flagged`, `categories` | pattern rules incl. personal data (GDPR-style) |
+| Legal / compliance | `PLAGIARISM_DETECTION_GENERAL` | `/plagiarism-check` | `similarity_pct`, `verdict` | overlap with a **supplied** source only |
+| Legal / compliance | `EMAIL_SECURITY_GENERAL` | `/email-security` | `lookup_ok`, `grade` | SPF/DKIM/DMARC via Google + Cloudflare DoH |
+| Legal / compliance | `TRANSACTION_RISK_GENERAL` | `/transaction-risk` | `risk_level`, `risk_score`, `signals` | additive rule scorecard |
+
+No language model and no API key is used anywhere: everything is rules, lexicons, public data sources or two-RPC agreement. (`LLM_OUTPUT_EVALUATION_GENERAL` judges a model's output with structural checks; it does not call a model.) The long-text endpoints also accept POST with a JSON body.

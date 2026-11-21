@@ -15,9 +15,10 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.cache import Cache
-from app.intents import (chain as chain_intents, contract as contract_intents, crypto as crypto_intents, dns as dns_intents,
-                         filings as filings_intents, registry as registry_intents, sanctions as sanctions_intents,
-                         sentiment as sentiment_intents, translate as translate_intents, vendor as vendor_intents,
+from app.intents import (chain as chain_intents, compliance as compliance_intents, contract as contract_intents, crypto as crypto_intents,
+                         defi as defi_intents, dns as dns_intents, emailsec as emailsec_intents, evm as evm_intents, filings as filings_intents,
+                         nlp as nlp_intents, registry as registry_intents, sanctions as sanctions_intents,
+                         sentiment as sentiment_intents, solidity as solidity_intents, translate as translate_intents, vendor as vendor_intents,
                          weather as weather_intents)
 from app.config import ENGINE_VERSION, SCORE_VERSION, Settings
 from app.inputs import findings_from_body, findings_from_query
@@ -36,6 +37,16 @@ from app.warmer import warm_cache
 
 log = logging.getLogger("vulnrank")
 MAX_BODY_BYTES = 256 * 1024
+# (route, intent) for the seventeen intents added on 2026-11-21: language, blockchain, legal and compliance
+EXTRA_ROUTES = [
+    ("/text-classification", "TEXT_CLASSIFICATION_GENERAL"), ("/keyword-extraction", "KEYWORD_EXTRACTION_GENERAL"), ("/semantic-similarity", "SEMANTIC_SIMILARITY_GENERAL"),
+    ("/entity-extraction", "ENTITY_EXTRACTION_GENERAL"), ("/text-summarization", "TEXT_SUMMARIZATION_GENERAL"), ("/llm-evaluation", "LLM_OUTPUT_EVALUATION_GENERAL"),
+    ("/ai-text-detection", "AI_TEXT_DETECTION_GENERAL"), ("/wallet-balance", "WALLET_BALANCE_CHECK_GENERAL"), ("/token-supply", "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL"),
+    ("/tvl", "TVL_LOOKUP_GENERAL"), ("/yield-rate", "CRYPTO_YIELD_RATE_GENERAL"), ("/liquidity-depth", "LIQUIDITY_DEPTH_VERIFY_GENERAL"),
+    ("/contract-source-audit", "SMART_CONTRACT_AUDIT_GENERAL"), ("/content-moderation", "CONTENT_MODERATION_GENERAL"), ("/plagiarism-check", "PLAGIARISM_DETECTION_GENERAL"),
+    ("/email-security", "EMAIL_SECURITY_GENERAL"), ("/transaction-risk", "TRANSACTION_RISK_GENERAL"),
+]
+EXTRA_INTENTS = [i for _, i in EXTRA_ROUTES]
 
 
 class _Json(logging.Formatter):
@@ -75,6 +86,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.review = ReviewService(svc, fetcher, client, SafeFetcher(safe_client), settings)
         app.state.review_slots = asyncio.Semaphore(2)
         app.state.sanctions = sanctions_intents.SanctionsIndex(fetcher)
+        app.state.defi = defi_intents.DefiIndex(fetcher)
+        defi_warm = asyncio.ensure_future(app.state.defi.ensure_pools()) if settings.warm_enabled else None  # ~6 MB pool list, load before the first ask
         sanctions_warm = asyncio.ensure_future(app.state.sanctions.ensure()) if settings.warm_enabled else None  # ~30 MB of lists, load before the first ask
         warmer = asyncio.ensure_future(warm_cache(svc, settings)) if settings.warm_enabled else None
         yield
@@ -82,6 +95,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             warmer.cancel()
         if sanctions_warm:
             sanctions_warm.cancel()
+        if defi_warm:
+            defi_warm.cancel()
         await client.aclose()
         await safe_client.aclose()
 
@@ -109,9 +124,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                    "GAS_PRICE_GENERAL", "ONCHAIN_TX_LOOKUP_GENERAL", "DNS_RECORD_LOOKUP_GENERAL",
                                    "SANCTIONS_SCREENING_MATCH_GENERAL", "CORPORATE_REGISTRY_LOOKUP_GENERAL", "VENDOR_VERIFY_GENERAL",
                                    "REGULATORY_FILING_MONITOR_GENERAL", "CONTRACT_OBLIGATION_AUDIT_GENERAL", "SENTIMENT_ANALYSIS_GENERAL",
-                                   "LANGUAGE_TRANSLATION_GENERAL"],
+                                   "LANGUAGE_TRANSLATION_GENERAL", *EXTRA_INTENTS],
                 "endpoints": ["/vuln-triage", "/launch-review", "/crypto-price", "/weather-temperature", "/gas-price", "/tx-lookup", "/dns-lookup", "/sanctions-screening",
-                              "/corporate-registry", "/vendor-verify", "/filing-monitor", "/contract-audit", "/sentiment", "/translate", "/v1/triage", "/v1/score-model", "/v1/sources/status", "/health"]}
+                              "/corporate-registry", "/vendor-verify", "/filing-monitor", "/contract-audit", "/sentiment", "/translate", *[r for r, _ in EXTRA_ROUTES], "/v1/triage", "/v1/score-model", "/v1/sources/status", "/health"]}
 
     @app.get("/health")
     async def health():  # cheap: no external calls
@@ -191,6 +206,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.get("/corporate-registry")(_extra(registry_intents.lookup, ensure={"legal_name": None}))
     app.get("/filing-monitor")(_extra(filings_intents.lookup, ensure={"filing_count": None}))
     app.get("/translate")(_extra(translate_intents.run, ensure={"translation": None}))
+
+    async def _params(request: Request) -> dict[str, Any]:
+        """Query parameters, plus a JSON or form body for POST (long texts and contracts do not fit a URL)."""
+        params: dict[str, Any] = dict(request.query_params)
+        if request.method == "POST":
+            try:
+                body = await request.json()
+                params.update({k: v if isinstance(v, (list, dict)) else str(v) for k, v in body.items() if v is not None} if isinstance(body, dict) else {})
+            except ValueError:
+                params.update({k: v for k, v in (await request.form()).items() if isinstance(v, str)})
+        return params
+
+    def _extra_route(route: str, handler, ensure: dict[str, Any], kind: str = "sync"):
+        async def endpoint(request: Request):
+            params = await _params(request)
+            if kind == "sync":
+                out = handler(params)
+            elif kind == "async":
+                out = await handler(params)
+            else:
+                f: Fetcher = request.app.state.fetcher
+                deadline = time.monotonic() + settings.request_deadline_sec
+                kw = {"timeout": settings.source_timeout_sec, "deadline": deadline}
+                if kind == "defi":
+                    out = await handler(f, request.app.state.defi, params, **kw)
+                else:
+                    out = await handler(f, params, **kw)
+            for k, v in ensure.items():
+                out.setdefault(k, v)
+            return out
+        app.api_route(route, methods=["GET", "POST"])(endpoint)
+
+    N, C = nlp_intents, compliance_intents
+    for route, handler, ensure, kind in [
+        ("/text-classification", N.text_classification, {"category": None}, "sync"), ("/keyword-extraction", N.keyword_extraction, {"keywords": None}, "sync"),
+        ("/semantic-similarity", N.semantic_similarity, {"similarity": None}, "sync"), ("/entity-extraction", N.entity_extraction, {"entities": None}, "sync"),
+        ("/text-summarization", N.text_summarization, {"summary": None}, "sync"), ("/llm-evaluation", N.llm_output_evaluation, {"rating": None, "score": None}, "sync"),
+        ("/ai-text-detection", N.ai_text_detection, {"verdict": None, "ai_likelihood": None}, "sync"),
+        ("/wallet-balance", evm_intents.wallet_balance, {"balance": None}, "fetch"), ("/token-supply", evm_intents.token_supply, {"total_supply": None}, "fetch"),
+        ("/tvl", defi_intents.tvl_lookup, {"tvl_usd": None}, "defi"), ("/yield-rate", defi_intents.yield_rate, {"supply_apy": None}, "defi"),
+        ("/liquidity-depth", defi_intents.liquidity_depth, {"liquidity_usd": None}, "defi"),
+        ("/contract-source-audit", solidity_intents.smart_contract_audit, {"verdict": None}, "sync"),
+        ("/content-moderation", C.content_moderation, {"verdict": None, "flagged": None}, "sync"), ("/plagiarism-check", C.plagiarism_detection, {"similarity_pct": None}, "sync"),
+        ("/email-security", emailsec_intents.lookup, {"lookup_ok": None}, "fetch"), ("/transaction-risk", C.transaction_risk, {"risk_level": None, "risk_score": None}, "sync"),
+    ]:
+        _extra_route(route, handler, ensure, kind)
 
     @app.get("/sentiment")
     async def sentiment(request: Request):

@@ -14,6 +14,15 @@ ENDPOINT_KEYS = {"path", "external_path", "method", "description", "intents", "p
                  "multipart_fields", "param_map"}
 
 
+# The seventeen intents added on 2026-11-21 (names from the Telegraph catalogue, catalog/intents.json in the bounties repo). The catalogue marked eight of
+# seven of them onchain_ready=false at that date (no response format; TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL: no decimals) and they are declared anyway, on the owner's call.
+NEW_INTENTS = [
+    "TEXT_CLASSIFICATION_GENERAL", "KEYWORD_EXTRACTION_GENERAL", "SEMANTIC_SIMILARITY_GENERAL", "ENTITY_EXTRACTION_GENERAL", "TEXT_SUMMARIZATION_GENERAL",
+    "LLM_OUTPUT_EVALUATION_GENERAL", "AI_TEXT_DETECTION_GENERAL",
+    "WALLET_BALANCE_CHECK_GENERAL", "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL", "TVL_LOOKUP_GENERAL", "CRYPTO_YIELD_RATE_GENERAL", "LIQUIDITY_DEPTH_VERIFY_GENERAL",
+    "SMART_CONTRACT_AUDIT_GENERAL", "CONTENT_MODERATION_GENERAL", "PLAGIARISM_DETECTION_GENERAL", "EMAIL_SECURITY_GENERAL", "TRANSACTION_RISK_GENERAL"]
+
+
 def test_closed_set_keys():
     assert set(M) <= ROOT_KEYS
     assert {"version", "kind", "id", "slug", "name", "base_url"} <= set(M)
@@ -27,7 +36,7 @@ def test_intent_is_canonical_and_consistent():
         "VULNERABILITY_TRIAGE_GENERAL", "SECURITY_REVIEW_GENERAL", "CRYPTO_PRICE_USD", "WEATHER_CHECK_TEMPERATURE",
         "GAS_PRICE_GENERAL", "ONCHAIN_TX_LOOKUP_GENERAL", "DNS_RECORD_LOOKUP_GENERAL",
         "SANCTIONS_SCREENING_MATCH_GENERAL", "CORPORATE_REGISTRY_LOOKUP_GENERAL", "VENDOR_VERIFY_GENERAL", "REGULATORY_FILING_MONITOR_GENERAL",
-        "CONTRACT_OBLIGATION_AUDIT_GENERAL", "SENTIMENT_ANALYSIS_GENERAL", "LANGUAGE_TRANSLATION_GENERAL"]
+        "CONTRACT_OBLIGATION_AUDIT_GENERAL", "SENTIMENT_ANALYSIS_GENERAL", "LANGUAGE_TRANSLATION_GENERAL", *NEW_INTENTS]
     assert all(set(e["intents"]) <= set(M["semantics"]["supported_intents"]) for e in M["endpoints"])
     assert set(M["intent_mapping"]) == set(M["semantics"]["supported_intents"])
     paths = {e["path"]: e for e in M["endpoints"]}
@@ -53,7 +62,9 @@ def test_kebab_slug_and_scored_field():
 
 
 def test_no_secrets():
-    assert "auth" not in M and "key" not in str(M).lower().replace("keyless", "")
+    import re
+    assert "auth" not in M
+    assert not re.search(r"api[_ -]?key|bearer|sk-ant|x-api-key|password|anthropic_api|secret\s*[:=]", str(M), re.I)   # keywords, keyless etc. are fine
 
 
 def test_extra_intent_mappings_point_at_real_response_fields():
@@ -69,3 +80,21 @@ def test_extra_intent_mappings_point_at_real_response_fields():
         assert all(f in out and out[f]["path"] == f for f in fields), intent
         assert all(f in M["output_schema"]["properties"] for f in fields), intent
     assert len({m["endpoint"] for m in M["intent_mapping"].values()}) == len(M["intent_mapping"])  # one endpoint per intent
+
+
+def test_new_intents_are_distinct_declared_and_routed():
+    from app.main import EXTRA_INTENTS, EXTRA_ROUTES
+    assert len(NEW_INTENTS) == 17 == len(set(NEW_INTENTS)) and EXTRA_INTENTS == NEW_INTENTS
+    paths = {e["path"]: e for e in M["endpoints"]}
+    for route, intent in EXTRA_ROUTES:
+        assert paths[route]["intents"] == [intent] and M["intent_mapping"][intent]["endpoint"] == route
+        out = M["intent_mapping"][intent]["output"]
+        assert out and all(v["path"].rstrip("[]") in M["output_schema"]["properties"] for v in out.values()), intent
+        required = paths[route]["params"]["query"]["required"]
+        assert required and all(p["name"] in M["input_schema"]["properties"] for p in required), intent
+        assert set(M["intent_mapping"][intent]["input"]) >= {p["name"] for p in required}, intent
+
+
+def test_description_counts_match():
+    n = len(M["semantics"]["supported_intents"])
+    assert n == 31 and "Thirty-one" in M["description"] and "Thirty-one" in M["input_schema"]["description"]

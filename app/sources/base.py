@@ -30,6 +30,8 @@ ALLOWED_HOSTS = frozenset(
         "www.treasury.gov", "sanctionslistservice.ofac.treas.gov", "wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com",
         "scsanctions.un.org", "unsolprodfiles.blob.core.windows.net", "api.gleif.org", "ec.europa.eu", "www.sec.gov", "data.sec.gov",
         "api.mymemory.translated.net",
+        # blockchain data (DefiLlama TVL and yield pools)
+        "api.llama.fi", "yields.llama.fi",
     }
 )
 
@@ -121,10 +123,12 @@ class Fetcher:
         timeout: float = 6.0,
         deadline: float | None = None,
         json_body: Any = None,
+        soft_statuses: frozenset[int] = frozenset(),
     ) -> tuple[int, Any]:
-        """Returns (status, parsed_json). 404 returns (404, None). Raises SourceError otherwise.
+        """Returns (status, parsed_json). 404 (and any status in `soft_statuses`, e.g. an API that answers 400 for an unknown id)
+        returns (status, None) without counting against the circuit breaker. Raises SourceError otherwise.
         With `json_body` the call is a POST (used for read-only batch queries such as OSV)."""
-        return await self._request(url, params, headers, timeout, deadline, json_body, "json")
+        return await self._request(url, params, headers, timeout, deadline, json_body, "json", soft_statuses=soft_statuses)
 
     async def get_text(
         self,
@@ -142,7 +146,7 @@ class Fetcher:
             raise SourceError("malformed", f"{urlparse(url).hostname} body exceeds {max_bytes} bytes")
         return status, text
 
-    async def _request(self, url, params, headers, timeout, deadline, json_body, mode: str, redirects: int = 0) -> tuple[int, Any]:
+    async def _request(self, url, params, headers, timeout, deadline, json_body, mode: str, redirects: int = 0, soft_statuses: frozenset[int] = frozenset()) -> tuple[int, Any]:
         parsed = urlparse(url)
         host = parsed.hostname or ""
         if parsed.scheme != "https" or host not in ALLOWED_HOSTS:
@@ -165,9 +169,9 @@ class Fetcher:
                     resp = await self.client.get(
                         url, params=params, headers=headers, timeout=eff_timeout, follow_redirects=False
                     )
-                if resp.status_code == 404:
+                if resp.status_code == 404 or resp.status_code in soft_statuses:
                     self._record(host, True)
-                    return 404, None
+                    return resp.status_code, None
                 loc = resp.headers.get("Location")
                 if resp.status_code in (301, 302, 303, 307, 308) and loc and redirects > 0:
                     self._record(host, True)

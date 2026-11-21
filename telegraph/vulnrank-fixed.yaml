@@ -9,15 +9,18 @@ slug: vulnrank-triage
 protocol: generic
 name: VulnRank - Security, Compliance and Verified Lookups
 description: >-
-  Fourteen intents, deterministic, no language model; a source that is unavailable is reported as unavailable, never as a negative
-  result. Security: CVE triage (NVD CVSS v3.1 score with CISA KEV, FIRST EPSS, asset-aware priority) and pre-launch security review
-  of code, packages, a public GitHub repository or website with a cited legal checklist. Legal and compliance: sanctions screening
-  (OFAC SDN and UN consolidated lists, fuzzy names and digital-currency addresses), legal-entity register records (GLEIF), vendor
-  verification (EU VAT via VIES, GLEIF, sanctions), SEC EDGAR filing monitoring, and obligation and deadline extraction from contract
-  text. Language: sentiment analysis (VADER lexicon, English) and translation (MyMemory; the text is sent to that service). Verified
-  lookups, each corroborated by two independent public sources: USD crypto price (Coinbase, Kraken), current city temperature
-  (Open-Meteo), gas price and transaction status on Ethereum, Base, Arbitrum, Polygon and Optimism (two public RPC operators), and
-  DNS record presence (Google Public DNS, Cloudflare). Screening and compliance output is evidence for human review, not legal advice.
+  Thirty-one intents. Deterministic and sourced, no language model: a source that is unavailable is reported as unavailable, never as a
+  negative result. Security: CVE triage (NVD CVSS v3.1 score with CISA KEV, FIRST EPSS, asset-aware priority), pre-launch security review
+  of code, packages, a public GitHub repository or website with a cited legal checklist, and static audit of Solidity source. Legal and
+  compliance: sanctions screening (OFAC SDN and UN consolidated lists), legal-entity register records (GLEIF), vendor verification (EU VAT
+  via VIES, GLEIF, sanctions), SEC EDGAR filing monitoring, contract obligation and deadline extraction, content moderation, plagiarism
+  overlap against a supplied source, email authentication (SPF, DKIM, DMARC) and rule-based payment transaction risk. Language: sentiment
+  (VADER), translation (MyMemory; the text is sent to that service), text classification, keyword and entity extraction, extractive
+  summarisation, semantic similarity, AI-text detection and model-output evaluation (all rule-based). Blockchain and DeFi: USD crypto
+  price (Coinbase, Kraken), gas price, transaction status, wallet balance and token total supply on Ethereum, Base, Arbitrum, Polygon and
+  Optimism (two public RPC operators that must agree), and TVL, APY and pool liquidity (DefiLlama). Also current city temperature
+  (Open-Meteo) and DNS record presence (Google Public DNS, Cloudflare). Screening, scoring and compliance output is evidence for human
+  review, not legal or financial advice.
 base_url: https://vulnrank.onrender.com
 
 endpoints:
@@ -354,9 +357,327 @@ endpoints:
             intents: ["*"]
             description: "Source language name or code; detected when omitted."
 
+  - path: /text-classification
+    external_path: /text-classification
+    method: GET
+    description: >-
+      Assign text to one of the labels you supply (for example billing, technical, account) using keyword and label-overlap scoring. Returns category, a one-sentence reason naming the words that decided it, and confidence. Returns category null when no label is supported by the text, instead of guessing. No language model. Not for tone (use sentiment).
+    intents: [TEXT_CLASSIFICATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The text to classify, verbatim."
+          - name: categories
+            type: string
+            intents: ["*"]
+            description: "Candidate labels, comma separated, for example billing, technical, account."
+        optional:
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim; the text and labels are read from it when absent."
+
+  - path: /keyword-extraction
+    external_path: /keyword-extraction
+    method: GET
+    description: >-
+      Extract the most representative keywords and key phrases from body text with RAKE phrase scoring. Returns keywords (strings, best first), scores and occurrence counts. Deterministic, no language model, no external call.
+    intents: [KEYWORD_EXTRACTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The body text to extract keywords from."
+        optional:
+          - name: top_n
+            type: string
+            intents: ["*"]
+            description: "How many keywords to return, 1 to 30; default 10."
+
+  - path: /semantic-similarity
+    external_path: /semantic-similarity
+    method: GET
+    description: >-
+      Cosine similarity (0 to 1) between two texts over stemmed words and bigrams with a small synonym list, plus a verdict (near_identical, highly_similar, related, different) and the shared terms. Lexical, not a neural embedding: paraphrases with different vocabulary score lower.
+    intents: [SEMANTIC_SIMILARITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: text_a
+            type: string
+            intents: ["*"]
+            description: "First text or sentence."
+          - name: text_b
+            type: string
+            intents: ["*"]
+            description: "Second text or sentence."
+
+  - path: /entity-extraction
+    external_path: /entity-extraction
+    method: GET
+    description: >-
+      Extract entities with character offsets: dates, money, percentages, emails, URLs, phone numbers, IP addresses, CVE ids, Ethereum addresses and transaction hashes, @handles, hashtags, and heuristic person, organisation and location names. Rule-based, no language model; person and organisation labels are heuristic.
+    intents: [ENTITY_EXTRACTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The text to extract entities from."
+
+  - path: /text-summarization
+    external_path: /text-summarization
+    method: GET
+    description: >-
+      Extractive summary of a long text: the highest-scoring original sentences in their original order, nothing added or reworded, with the compression ratio. Deterministic, no language model, so it cannot hallucinate.
+    intents: [TEXT_SUMMARIZATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The document to summarise, verbatim."
+        optional:
+          - name: sentences
+            type: string
+            intents: ["*"]
+            description: "Number of sentences wanted, 1 to 8; chosen from the length when absent."
+
+  - path: /llm-evaluation
+    external_path: /llm-evaluation
+    method: GET
+    description: >-
+      Structural quality check of a model's output against the task it was given: task-term coverage, repetition loops, truncation, unfilled placeholders, refusal language, and whether JSON, word-limit and list-count instructions were met. Returns rating (poor, fair, good, excellent), score 0 to 1, strengths and errors. It cannot verify factual accuracy or hallucination without a reference, and says so.
+    intents: [LLM_OUTPUT_EVALUATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: task
+            type: string
+            intents: ["*"]
+            description: "The prompt or task the model was given."
+          - name: output
+            type: string
+            intents: ["*"]
+            description: "The model output to evaluate, verbatim."
+
+  - path: /ai-text-detection
+    external_path: /ai-text-detection
+    method: GET
+    description: >-
+      Stylometric estimate of whether supplied text (at least 40 words) was written by an AI: sentence-length variation, stock phrases, contractions, voice. Returns verdict (likely_ai, uncertain, likely_human), ai_likelihood 0 to 1 and the cues. A heuristic, not proof of authorship; confidence is capped accordingly.
+    intents: [AI_TEXT_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The text to assess, verbatim."
+
+
+
+
+  - path: /wallet-balance
+    external_path: /wallet-balance
+    method: GET
+    description: >-
+      Current native or ERC-20 balance of one 0x address on Ethereum, Base, Arbitrum, Polygon or Optimism, read from two independent public RPC operators that must agree. Tokens: USDC, USDT, DAI, WETH, WBTC or a 0x contract. ENS names are not resolved. An RPC outage is reported as unavailable, never as zero.
+    intents: [WALLET_BALANCE_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: address
+            type: string
+            intents: ["*"]
+            description: "The 0x wallet address."
+        optional:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Network: eth, base, arbitrum, polygon or optimism; default eth."
+          - name: token
+            type: string
+            intents: ["*"]
+            description: "Token symbol or 0x contract; the chain's native coin when omitted."
+
+  - path: /token-supply
+    external_path: /token-supply
+    method: GET
+    description: >-
+      ERC-20 totalSupply() of a token on Ethereum, Base, Arbitrum, Polygon or Optimism, read from two independent public RPC operators that must agree within 0.1 percent. Returns total_supply in whole tokens, the raw integer, decimals and symbol. Total supply is minted minus burned, not circulating supply.
+    intents: [TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: token
+            type: string
+            intents: ["*"]
+            description: "Token symbol (USDC, USDT, DAI, WETH, WBTC) or 0x contract address."
+        optional:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Network: eth, base, arbitrum, polygon or optimism; default eth."
+
+  - path: /tvl
+    external_path: /tvl
+    method: GET
+    description: >-
+      Total value locked in a DeFi protocol (aave, uniswap, lido, aave-v3), in a chain (Base, Ethereum), or the DEX-pool liquidity of a token contract on a chain, from DefiLlama. Returns tvl_usd, chain_tvl_usd when a chain is named, and the as-of time. Unknown names are reported as not found.
+    intents: [TVL_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: protocol
+            type: string
+            intents: ["*"]
+            description: "Protocol, chain, or token contract (0x...) to look up."
+        optional:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Chain to scope a token contract or report chain TVL, for example base."
+
+  - path: /yield-rate
+    external_path: /yield-rate
+    method: GET
+    description: >-
+      Current APY of a DeFi pool or lending market from DefiLlama: the largest pool matching project, symbol and chain. Returns supply_apy in percent per year with its base and reward parts, the pool TVL and the number of pools it chose from.
+    intents: [CRYPTO_YIELD_RATE_GENERAL]
+    params:
+      query:
+        required:
+          - name: project
+            type: string
+            intents: ["*"]
+            description: "Protocol, for example aave-v3, compound-v3, lido."
+          - name: symbol
+            type: string
+            intents: ["*"]
+            description: "Asset symbol, for example USDC, ETH, STETH."
+        optional:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Chain, for example ethereum or base."
+
+  - path: /liquidity-depth
+    external_path: /liquidity-depth
+    method: GET
+    description: >-
+      Liquidity of a DEX trading pair on a chain from DefiLlama pool TVL (for example WETH/USDC on Base), with a constant-product slippage estimate when the question states a trade size in dollars. Returns liquidity_usd, the chosen pool and 24-hour volume. Pool TVL, not an order-book depth snapshot.
+    intents: [LIQUIDITY_DEPTH_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: pool
+            type: string
+            intents: ["*"]
+            description: "Trading pair such as WETH/USDC, or a DefiLlama pool id."
+        optional:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Chain, for example base."
+          - name: question
+            type: string
+            intents: ["*"]
+            description: "The user's original question, verbatim; a dollar trade size in it gives a slippage estimate."
+
+  - path: /contract-source-audit
+    external_path: /contract-source-audit
+    method: GET
+    description: >-
+      Static pattern audit of pasted Solidity source: reentrancy, tx.origin authorisation, selfdestruct, delegatecall, unchecked low-level calls, missing access control on privileged functions, floating pragma, pre-0.8 overflow, weak randomness, timestamp dependence, with SWC ids, line numbers and fixes. Verdict is critical_issues_found, issues_found or no_issues_detected, never 'secure'. Bytecode and bare addresses are not audited.
+    intents: [SMART_CONTRACT_AUDIT_GENERAL]
+    params:
+      query:
+        required:
+          - name: contract
+            type: string
+            intents: ["*"]
+            description: "Solidity source code."
+
+  - path: /content-moderation
+    external_path: /content-moderation
+    method: GET
+    description: >-
+      Moderate a piece of content with pattern rules: violent threats, hate, illegal-goods offers, self-harm, harassment, sexual content, profanity, spam and scams, and personal data (emails, phone numbers, SSNs, card numbers). Returns verdict (safe, review, unsafe), flagged, categories and the reason with matched text. Explicit patterns only; coded abuse can be missed.
+    intents: [CONTENT_MODERATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The content to moderate, verbatim."
+
+  - path: /plagiarism-check
+    external_path: /plagiarism-check
+    method: GET
+    description: >-
+      Compare a text against a source text you supply: percentage of words copied verbatim (5-word shingles), the matched passages, and a possible-paraphrase flag from vocabulary similarity. Compares two supplied texts only; it does not search the web or a corpus and cannot say a text is original.
+    intents: [PLAGIARISM_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: text
+            type: string
+            intents: ["*"]
+            description: "The text to check."
+          - name: source
+            type: string
+            intents: ["*"]
+            description: "The reference text to compare it against."
+
+  - path: /email-security
+    external_path: /email-security
+    method: GET
+    description: >-
+      Mail authentication of a domain from two DNS-over-HTTPS resolvers: SPF (policy, lookup count, duplicates), DMARC (policy, reporting) and DKIM at common selectors, with a grade A to F. lookup_ok is true when the requested record exists and is valid, false when it is missing or invalid, null when DNS failed. Does not analyse message headers or attachments.
+    intents: [EMAIL_SECURITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: domain
+            type: string
+            intents: ["*"]
+            description: "Domain or email address, for example example.com."
+        optional:
+          - name: record_type
+            type: string
+            intents: ["*"]
+            description: "SPF, DKIM, DMARC or MX; SPF and DMARC together when omitted."
+          - name: selector
+            type: string
+            intents: ["*"]
+            description: "DKIM selector to check instead of the common ones."
+
+  - path: /transaction-risk
+    external_path: /transaction-risk
+    method: GET
+    description: >-
+      Rule-based risk score for authorising a payment from the context you describe: amount, merchant category, attempt velocity, chargeback history, billing or shipping mismatch, VPN, new device or account, failed CVV or AVS, and mitigating signals such as 3-D Secure. Returns risk_level (low, medium, high, critical), risk_score 0 to 100, the signals and a suggested action. A scorecard, not a chargeback probability model.
+    intents: [TRANSACTION_RISK_GENERAL]
+    params:
+      query:
+        required:
+          - name: transaction
+            type: string
+            intents: ["*"]
+            description: "Plain-language description of the payment and its context."
+
 input_schema:
   type: object
-  description: "Fourteen endpoints with different request shapes (cve_id, target, symbol, location, chain, tx_hash, name, company, vendor, entity, contract, text, ...)."
+  description: "Thirty-one endpoints with different request shapes (cve_id, target, symbol, location, chain, tx_hash, name, company, vendor, entity, contract, text, ...)."
   properties:
     cve_id:
       type: string
@@ -387,6 +708,22 @@ input_schema:
     year_of_birth: { type: string }
     as_of: { type: string }
     registration_id: { type: string }
+    address: { type: string }
+    categories: { type: string }
+    domain: { type: string }
+    output: { type: string }
+    pool: { type: string }
+    project: { type: string }
+    protocol: { type: string }
+    selector: { type: string }
+    sentences: { type: string }
+    source: { type: string }
+    task: { type: string }
+    text_a: { type: string }
+    text_b: { type: string }
+    token: { type: string }
+    top_n: { type: string }
+    transaction: { type: string }
 
 output_schema:
   type: object
@@ -447,6 +784,48 @@ output_schema:
     target_language: { type: [string, "null"] }
     source_language: { type: [string, "null"] }
     outcome: { type: string, description: "ok, or why no value was given (unavailable, conflicting, ...)." }
+    address: { type: [string, "null"] }
+    ai_likelihood: { type: [number, "null"] }
+    as_of: { type: [string, "null"] }
+    balance: { type: [number, "null"] }
+    categories: { type: array }
+    category: { type: [string, "null"] }
+    chain_tvl_usd: { type: [number, "null"] }
+    compression: { type: [number, "null"] }
+    cues: { type: array }
+    dkim: { type: [object, "null"] }
+    dmarc: { type: [object, "null"] }
+    entities: { type: array }
+    entity_count: { type: [integer, "null"] }
+    errors: { type: array }
+    finding_count: { type: [integer, "null"] }
+    findings: { type: array }
+    flagged: { type: [boolean, "null"] }
+    grade: { type: [string, "null"] }
+    keyword_count: { type: [integer, "null"] }
+    keywords: { type: array }
+    liquidity_usd: { type: [number, "null"] }
+    lookup_ok: { type: [boolean, "null"] }
+    matched_passages: { type: array }
+    plagiarized: { type: [boolean, "null"] }
+    pool: { type: [string, "null"] }
+    project: { type: [string, "null"] }
+    protocol_or_chain: { type: [string, "null"] }
+    rating: { type: [string, "null"] }
+    reason: { type: [string, "null"] }
+    risk_level: { type: [string, "null"] }
+    shared_terms: { type: array }
+    signals: { type: array }
+    similarity: { type: [number, "null"] }
+    similarity_pct: { type: [number, "null"] }
+    spf: { type: [object, "null"] }
+    strengths: { type: array }
+    supply_apy: { type: [number, "null"] }
+    symbol: { type: [string, "null"] }
+    token_address: { type: [string, "null"] }
+    token_symbol: { type: [string, "null"] }
+    total_supply: { type: [number, "null"] }
+    tvl_usd: { type: [number, "null"] }
 
 intent_mapping:
   VULNERABILITY_TRIAGE_GENERAL:
@@ -574,6 +953,169 @@ intent_mapping:
       target_language: { path: target_language }
       source_language: { path: source_language }
 
+  TEXT_CLASSIFICATION_GENERAL:
+    endpoint: /text-classification
+    input:
+      text: { from: text, how: "The text to classify, verbatim." }
+      categories: { from: categories, how: "Candidate labels, comma separated, for example billing, technical, account." }
+    output:
+      category: { path: "category" }
+      reason: { path: "reason" }
+      confidence: { path: "confidence" }
+  KEYWORD_EXTRACTION_GENERAL:
+    endpoint: /keyword-extraction
+    input:
+      text: { from: text, how: "The body text to extract keywords from." }
+      top_n: { from: top_n, how: "How many keywords to return, 1 to 30; default 10." }
+    output:
+      keywords: { path: "keywords[]" }
+      keyword_count: { path: "keyword_count" }
+  SEMANTIC_SIMILARITY_GENERAL:
+    endpoint: /semantic-similarity
+    input:
+      text_a: { from: text_a, how: "First text or sentence." }
+      text_b: { from: text_b, how: "Second text or sentence." }
+    output:
+      similarity: { path: "similarity" }
+      verdict: { path: "verdict" }
+      shared_terms: { path: "shared_terms[]" }
+  ENTITY_EXTRACTION_GENERAL:
+    endpoint: /entity-extraction
+    input:
+      text: { from: text, how: "The text to extract entities from." }
+    output:
+      entities: { path: "entities[]" }
+      entity_count: { path: "entity_count" }
+  TEXT_SUMMARIZATION_GENERAL:
+    endpoint: /text-summarization
+    input:
+      text: { from: text, how: "The document to summarise, verbatim." }
+      sentences: { from: sentences, how: "Number of sentences wanted, 1 to 8; chosen from the length when absent." }
+    output:
+      summary: { path: "summary" }
+      compression: { path: "compression" }
+  LLM_OUTPUT_EVALUATION_GENERAL:
+    endpoint: /llm-evaluation
+    input:
+      task: { from: task, how: "The prompt or task the model was given." }
+      output: { from: output, how: "The model output to evaluate, verbatim." }
+    output:
+      rating: { path: "rating" }
+      score: { path: "score" }
+      strengths: { path: "strengths[]" }
+      errors: { path: "errors[]" }
+  AI_TEXT_DETECTION_GENERAL:
+    endpoint: /ai-text-detection
+    input:
+      text: { from: text, how: "The text to assess, verbatim." }
+    output:
+      verdict: { path: "verdict" }
+      ai_likelihood: { path: "ai_likelihood" }
+      cues: { path: "cues[]" }
+  WALLET_BALANCE_CHECK_GENERAL:
+    endpoint: /wallet-balance
+    input:
+      address: { from: address, how: "The 0x wallet address." }
+      chain: { from: chain, how: "Network: eth, base, arbitrum, polygon or optimism; default eth." }
+      token: { from: token, how: "Token symbol or 0x contract; the chain's native coin when omitted." }
+    output:
+      address: { path: "address" }
+      chain: { path: "chain" }
+      balance: { path: "balance", unit: "whole tokens" }
+      token_symbol: { path: "token_symbol" }
+      as_of: { path: "as_of" }
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL:
+    endpoint: /token-supply
+    input:
+      token: { from: token, how: "Token symbol (USDC, USDT, DAI, WETH, WBTC) or 0x contract address." }
+      chain: { from: chain, how: "Network: eth, base, arbitrum, polygon or optimism; default eth." }
+    output:
+      total_supply: { path: "total_supply", unit: "whole tokens" }
+      token_symbol: { path: "token_symbol" }
+      token_address: { path: "token_address" }
+      chain: { path: "chain" }
+  TVL_LOOKUP_GENERAL:
+    endpoint: /tvl
+    input:
+      protocol: { from: protocol, how: "Protocol, chain, or token contract (0x...) to look up." }
+      chain: { from: chain, how: "Chain to scope a token contract or report chain TVL, for example base." }
+    output:
+      protocol_or_chain: { path: "protocol_or_chain" }
+      tvl_usd: { path: "tvl_usd", unit: "US dollars" }
+      chain_tvl_usd: { path: "chain_tvl_usd", unit: "US dollars" }
+      as_of: { path: "as_of" }
+  CRYPTO_YIELD_RATE_GENERAL:
+    endpoint: /yield-rate
+    input:
+      project: { from: project, how: "Protocol, for example aave-v3, compound-v3, lido." }
+      symbol: { from: symbol, how: "Asset symbol, for example USDC, ETH, STETH." }
+      chain: { from: chain, how: "Chain, for example ethereum or base." }
+    output:
+      supply_apy: { path: "supply_apy", unit: "percent per year" }
+      project: { path: "project" }
+      symbol: { path: "symbol" }
+      chain: { path: "chain" }
+      tvl_usd: { path: "tvl_usd", unit: "US dollars" }
+  LIQUIDITY_DEPTH_VERIFY_GENERAL:
+    endpoint: /liquidity-depth
+    input:
+      pool: { from: pool, how: "Trading pair such as WETH/USDC, or a DefiLlama pool id." }
+      chain: { from: chain, how: "Chain, for example base." }
+    output:
+      liquidity_usd: { path: "liquidity_usd", unit: "US dollars" }
+      pool: { path: "pool" }
+      project: { path: "project" }
+      chain: { path: "chain" }
+  SMART_CONTRACT_AUDIT_GENERAL:
+    endpoint: /contract-source-audit
+    input:
+      contract: { from: contract, how: "Solidity source code." }
+    output:
+      verdict: { path: "verdict" }
+      findings: { path: "findings[]" }
+      finding_count: { path: "finding_count" }
+      summary: { path: "summary" }
+  CONTENT_MODERATION_GENERAL:
+    endpoint: /content-moderation
+    input:
+      text: { from: text, how: "The content to moderate, verbatim." }
+    output:
+      verdict: { path: "verdict" }
+      flagged: { path: "flagged" }
+      categories: { path: "categories[]" }
+      reason: { path: "reason" }
+  PLAGIARISM_DETECTION_GENERAL:
+    endpoint: /plagiarism-check
+    input:
+      text: { from: text, how: "The text to check." }
+      source: { from: source, how: "The reference text to compare it against." }
+    output:
+      similarity_pct: { path: "similarity_pct" }
+      plagiarized: { path: "plagiarized" }
+      verdict: { path: "verdict" }
+      matched_passages: { path: "matched_passages[]" }
+  EMAIL_SECURITY_GENERAL:
+    endpoint: /email-security
+    input:
+      domain: { from: domain, how: "Domain or email address, for example example.com." }
+      record_type: { from: record_type, how: "SPF, DKIM, DMARC or MX; SPF and DMARC together when omitted." }
+      selector: { from: selector, how: "DKIM selector to check instead of the common ones." }
+    output:
+      lookup_ok: { path: "lookup_ok" }
+      grade: { path: "grade" }
+      spf: { path: "spf" }
+      dmarc: { path: "dmarc" }
+      dkim: { path: "dkim" }
+  TRANSACTION_RISK_GENERAL:
+    endpoint: /transaction-risk
+    input:
+      transaction: { from: transaction, how: "Plain-language description of the payment and its context." }
+    output:
+      risk_level: { path: "risk_level" }
+      risk_score: { path: "risk_score" }
+      signals: { path: "signals[]" }
+      summary: { path: "summary" }
+
 semantics:
   signal_mapping:
     label_field: priority
@@ -594,6 +1136,23 @@ semantics:
     - CONTRACT_OBLIGATION_AUDIT_GENERAL
     - SENTIMENT_ANALYSIS_GENERAL
     - LANGUAGE_TRANSLATION_GENERAL
+    - TEXT_CLASSIFICATION_GENERAL
+    - KEYWORD_EXTRACTION_GENERAL
+    - SEMANTIC_SIMILARITY_GENERAL
+    - ENTITY_EXTRACTION_GENERAL
+    - TEXT_SUMMARIZATION_GENERAL
+    - LLM_OUTPUT_EVALUATION_GENERAL
+    - AI_TEXT_DETECTION_GENERAL
+    - WALLET_BALANCE_CHECK_GENERAL
+    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
+    - TVL_LOOKUP_GENERAL
+    - CRYPTO_YIELD_RATE_GENERAL
+    - LIQUIDITY_DEPTH_VERIFY_GENERAL
+    - SMART_CONTRACT_AUDIT_GENERAL
+    - CONTENT_MODERATION_GENERAL
+    - PLAGIARISM_DETECTION_GENERAL
+    - EMAIL_SECURITY_GENERAL
+    - TRANSACTION_RISK_GENERAL
 
 limitations:
   - code: MAX_PARAM_LENGTH
